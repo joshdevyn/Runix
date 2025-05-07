@@ -1,0 +1,296 @@
+version: '3'
+
+vars:
+  DIST_DIR: dist
+  REPORTS_DIR: reports
+  DRIVERS_DIR: drivers
+  BIN_DIR: bin
+  BINARY_DIR: 'bin/runix'
+
+tasks:
+  default:
+    desc: Display available tasks
+    cmds:
+      - task -l
+
+  # Build tasks
+  build:
+    desc: Build the Runix project
+    cmds:
+      - npm run build
+    sources:
+      - src/**/*.ts
+    generates:
+      - "{{.DIST_DIR}}/**/*.js"
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - cmd: powershell -Command "if (Test-Path {{.DIST_DIR}}) { Remove-Item -Recurse -Force {{.DIST_DIR}} }"
+        platforms: [windows]
+      - cmd: rm -rf {{.DIST_DIR}}
+        platforms: [darwin, linux]
+      - cmd: powershell -Command "if (Test-Path {{.REPORTS_DIR}}) { Remove-Item -Recurse -Force {{.REPORTS_DIR}} }"
+        platforms: [windows]
+      - cmd: rm -rf {{.REPORTS_DIR}}
+        platforms: [darwin, linux]
+      - cmd: powershell -Command "if (Test-Path coverage) { Remove-Item -Recurse -Force coverage }"
+        platforms: [windows]
+      - cmd: rm -rf coverage
+        platforms: [darwin, linux]
+
+  bundle:
+    desc: Bundle the project into executables
+    deps: [build]
+    cmds:
+      - npm run bundle
+
+  # Complete build solution
+  build-all:
+    desc: Build Runix binary and all example drivers
+    cmds:
+      - task: bundle
+      # Create directories
+      - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path {{.BIN_DIR}} | Out-Null"
+        platforms: [windows]
+      - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path {{.BIN_DIR}}/drivers | Out-Null"
+        platforms: [windows]
+      - cmd: mkdir -p {{.BIN_DIR}} {{.BIN_DIR}}/drivers
+        platforms: [darwin, linux]
+      # Create the runix executable
+      - cmd: powershell -Command "npm run build-binaries"
+        platforms: [windows]
+      - cmd: npm run build-binaries
+        platforms: [darwin, linux]
+      # Build the drivers as executables
+      - echo "Building driver executables..."
+      - task: build-drivers
+
+  build-drivers:
+    desc: Build and install all example drivers as executables
+    cmds:
+      - echo "Building driver executables..."
+      # Build the example driver in its own directory first
+      - task: build-example-driver
+      # Ensure the driver directory exists in bin directory
+      - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path {{.BIN_DIR}}/drivers/example-driver | Out-Null"
+        platforms: [windows]
+      # Copy the built executable and necessary files to bin directory
+      - cmd: powershell -Command "if (Test-Path {{.DRIVERS_DIR}}/example-driver/ExampleDriver.exe) { Copy-Item {{.DRIVERS_DIR}}/example-driver/ExampleDriver.exe {{.BIN_DIR}}/drivers/example-driver/ -Force }"
+        platforms: [windows]
+      - cmd: powershell -Command "if (Test-Path {{.DRIVERS_DIR}}/example-driver/driver.json) { Copy-Item {{.DRIVERS_DIR}}/example-driver/driver.json {{.BIN_DIR}}/drivers/example-driver/ -Force }"
+        platforms: [windows]
+      # For other platforms
+      - cmd: bash scripts/build-drivers.sh {{.DRIVERS_DIR}} {{.BIN_DIR}}
+        platforms: [darwin, linux]
+      - echo "All driver executables built and installed"
+
+  build-example-driver:
+    desc: Build only the example driver executable
+    cmds:
+      - echo "Building example driver in {{.DRIVERS_DIR}}/example-driver"
+      - cmd: powershell -Command "Push-Location {{.DRIVERS_DIR}}/example-driver; npm install; npm run build; Pop-Location"
+        platforms: [windows]
+      - cmd: cd {{.DRIVERS_DIR}}/example-driver && npm install && npm run build && cd -
+        platforms: [darwin, linux]
+
+  # Test tasks
+  test:
+    desc: Run all tests
+    cmds:
+      - jest
+
+  test:unit:
+    desc: Run unit tests
+    cmds:
+      - jest --testPathPattern=tests/unit
+
+  test:integration:
+    desc: Run integration tests
+    cmds:
+      - jest --testPathPattern=tests/integration
+
+  test:e2e:
+    desc: Run end-to-end tests
+    cmds:
+      - jest --testPathPattern=tests/e2e
+      
+  verify-drivers:
+    desc: Verify that drivers are correctly installed and accessible
+    cmds:
+      - echo "Verifying drivers..."
+      - cmd: npx ts-node src/drivers/driverRegistry.ts verify
+        platforms: [windows, darwin, linux]
+
+  import-steps:
+    desc: Import and register all driver steps
+    cmds:
+      - echo "Importing driver steps..."
+      - cmd: powershell -Command "if (Test-Path scripts/import-driver-steps.js) { node scripts/import-driver-steps.js } else { echo 'Warning Could not import steps' }"
+        platforms: [windows]
+      - cmd: bash -c "if [ -f scripts/import-driver-steps.js ]; then node scripts/import-driver-steps.js; else echo 'Warning Could not import steps'; fi"
+        platforms: [darwin, linux]
+
+  run-with-port:
+    desc: Run a feature file with a specific port
+    cmds:
+      - cmd: $env:RUNIX_DRIVER_PORT="{{.PORT}}"; ts-node src/index.ts run {{.FEATURE_PATH}} --driver={{.DRIVER}}
+        platforms: [windows]
+      - cmd: RUNIX_DRIVER_PORT={{.PORT}} ts-node src/index.ts run {{.FEATURE_PATH}} --driver={{.DRIVER}}
+        platforms: [darwin, linux]
+    requires:
+      vars: [PORT, FEATURE_PATH, DRIVER]
+
+  # Driver tasks
+  create-driver:
+    desc: Create a new driver scaffold
+    cmds:
+      - node scripts/create-driver.js {{.CLI_ARGS}}
+    requires:
+      vars: [CLI_ARGS]
+
+  test-driver:
+    desc: Test a specific driver
+    cmds:
+      - node scripts/test-driver.js {{.CLI_ARGS}}
+    requires:
+      vars: [CLI_ARGS]
+
+  list-drivers:
+    desc: List all available drivers
+    cmds:
+      - ts-node src/index.ts list-drivers
+
+  # Run tasks
+  run:
+    desc: Run a feature file with Runix
+    cmds:
+      - ts-node src/index.ts run {{.CLI_ARGS}}
+    requires:
+      vars: [CLI_ARGS]
+
+  run:example:
+    desc: Run the example feature
+    cmds:
+      - ts-node src/index.ts run scenarios/example.feature
+
+  run:driver-example:
+    desc: Run the example driver feature
+    cmds:
+      - ts-node src/index.ts run scenarios/example-driver.feature
+
+  run:driver-example:with-port:
+    desc: Run the example driver feature with a specific port
+    cmds:
+      - task: run-with-port
+        vars:
+          PORT: "{{.PORT}}"
+          FEATURE_PATH: scenarios/example-driver.feature
+          DRIVER: exampledriver
+    requires:
+      vars: [PORT]
+
+  # Development tasks
+  dev:
+    desc: Run in development mode with auto-reload
+    cmds:
+      - ts-node-dev --respawn src/index.ts {{.CLI_ARGS}}
+
+  # Development driver workflow
+  dev-drivers:
+    desc: Build drivers and run example scenarios
+    cmds:
+      - task: build-drivers
+      - task: run:driver-example
+
+  # Documentation tasks
+  docs:
+    desc: Generate documentation
+    cmds:
+      - echo "Documentation generation not implemented yet"
+
+  # CI/CD tasks
+  ci:
+    desc: Run continuous integration tasks
+    cmds:
+      - task: clean
+      - task: build
+      - task: test:coverage
+      - task: bundle
+
+  # Setup and installation tasks
+  setup:
+    desc: Setup development environment
+    cmds:
+      - npm install
+      - cmd: powershell -Command "if (!(Test-Path {{.REPORTS_DIR}})) { New-Item -ItemType Directory -Force -Path {{.REPORTS_DIR}} }"
+        platforms: [windows]
+      - cmd: mkdir -p {{.REPORTS_DIR}}
+        platforms: [darwin, linux]
+      - powershell -Command "if (!(Test-Path logs)) { New-Item -ItemType Directory -Force -Path logs }"
+
+  # Driver development workflow
+  driver:dev:
+    desc: Complete driver development workflow
+    cmds:
+      - task: create-driver
+        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
+      - echo "Installing dependencies for {{.CLI_ARGS}} driver..."
+      - cmd: powershell -Command "Push-Location {{.DRIVERS_DIR}}/{{.CLI_ARGS}} && npm install && Pop-Location"
+        platforms: [windows]
+      - cmd: cd {{.DRIVERS_DIR}}/{{.CLI_ARGS}} && npm install && cd -
+        platforms: [darwin, linux]
+      - echo "Testing {{.CLI_ARGS}} driver..."
+      - task: test-driver
+        vars: { CLI_ARGS: "{{.DRIVERS_DIR}}/{{.CLI_ARGS}}" }
+    requires:
+      vars: [CLI_ARGS]
+
+  # Quick start for new users
+  quickstart:
+    desc: Setup, build and run example
+    cmds:
+      - echo "Starting Runix quickstart process"
+      - task: setup
+      - task: build-all
+      - task: verify-drivers
+      - echo "Running example scenario"
+      # ▶ inline the env-var as an absolute path so the .exe is found
+      - cmd: 'cmd /C "set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run scenarios\example-driver.feature --driver=exampledriver --driverConfig={\"timeout\":30000}"'
+        platforms: [windows]
+      - cmd: RUNIX_DRIVER_DIR=bin/drivers ./bin/run-runix run scenarios/example-driver.feature --driver=exampledriver --driverConfig='{\"timeout\":30000}'
+        platforms: [darwin, linux]
+      - echo "Quickstart complete"
+
+  quickstart:debug:
+    desc: Setup and debug example
+    cmds:
+      - task: setup
+      - task: build-all
+      - task: verify-drivers
+      - task: import-steps
+      - echo "Running in debug mode"
+      - cmd: $env:RUNIX_LOG_LEVEL="DEBUG"; $env:RUNIX_LOG_CONSOLE="true"; cmd /c bin\\runix.bat run scenarios\\example-driver.feature --driver=exampledriver
+        platforms: [windows]
+      - cmd: RUNIX_LOG_LEVEL=DEBUG RUNIX_LOG_CONSOLE=true ./bin/run-runix run scenarios/example-driver.feature --driver=exampledriver
+        platforms: [darwin, linux]
+
+  debug:
+    desc: Run with TypeScript debugger
+    cmds:
+      - npm run debug -- {{.CLI_ARGS}}
+
+  log-clean:
+    desc: Clean log files
+    cmds:
+      - powershell -Command "if (Test-Path logs) { Remove-Item -Recurse -Force logs/* }"
+
+  verify-files:
+    desc: Verify that important files exist
+    cmds:
+      - cmd: powershell -Command "if (Test-Path .\\bin\\runix.bat) { Write-Host 'runix.bat exists' } else { Write-Host 'runix.bat MISSING' }"
+        platforms: [windows]
+      - cmd: powershell -Command "Get-ChildItem -Path bin -Recurse | Select-Object FullName"
+        platforms: [windows]
+      - cmd: "ls -la ./bin"
+        platforms: [darwin, linux]

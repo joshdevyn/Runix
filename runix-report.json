@@ -1,0 +1,68 @@
+[
+  {
+    "success": true,
+    "step": "echo the message \"Hello, Runix!\"",
+    "data": {
+      "message": "\"Hello, Runix!\""
+    }
+  },
+  {
+    "success": true,
+    "step": "echo the message \"Testing the driver system\"",
+    "data": {
+      "message": "\"Testing the driver system\""
+    }
+  },
+  {
+    "success": true,
+    "step": "echo the message \"This is working!\"",
+    "data": {
+      "message": "\"This is working!\""
+    }
+  },
+  {
+    "success": true,
+    "step": "add 5 and 3",
+    "data": {
+      "sum": 8,
+      "result": 8
+    }
+  },
+  {
+    "success": true,
+    "step": "add 10 and 20",
+    "data": {
+      "sum": 30,
+      "result": 30
+    }
+  },
+  {
+    "success": true,
+    "step": "add 123 and 456",
+    "data": {
+      "sum": 579,
+      "result": 579
+    }
+  },
+  {
+    "success": true,
+    "step": "wait for 1000 milliseconds",
+    "data": {
+      "waitedFor": 1000
+    }
+  },
+  {
+    "success": true,
+    "step": "wait for 500 milliseconds",
+    "data": {
+      "waitedFor": 500
+    }
+  },
+  {
+    "success": true,
+    "step": "echo the message \"Done waiting\"",
+    "data": {
+      "message": "\"Done waiting\""
+    }
+  }
+]

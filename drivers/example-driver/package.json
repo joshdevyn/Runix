@@ -1,0 +1,21 @@
+{
+  "name": "example-driver",
+  "version": "1.0.0",
+  "description": "Example driver for Runix automation engine",
+  "main": "index.js",
+  "bin": "driver.js",
+  "scripts": {
+    "start": "node index.js",
+    "build": "node build.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2",
+    "http": "^0.0.1-security"
+  },
+  "pkg": {
+    "assets": ["**/*", "!node_modules/pkg/**/*"],
+    "targets": ["node18-win-x64"]
+  },
+  "author": "Runix Team",
+  "license": "MIT"
+}

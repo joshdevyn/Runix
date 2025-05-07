@@ -1,0 +1,67 @@
+{
+  "name": "runix",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "bin": {
+    "runix": "dist/index.js"
+  },
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "build": "tsc",
+    "bundle": "pkg dist/index.js --targets node18-win-x64,node18-linux-x64,node18-macos-x64",
+    "clean": "rimraf dist",
+    "example": "ts-node src/index.ts run scenarios/example.feature",
+    "driver-example": "ts-node src/index.ts run scenarios/example-driver.feature",
+    "test": "jest",
+    "test:unit": "jest --testPathPattern=tests/unit",
+    "test:integration": "jest --testPathPattern=tests/integration",
+    "test:e2e": "jest --testPathPattern=tests/e2e",
+    "test:all": "jest --coverage",
+    "create-driver": "node scripts/create-driver.js",
+    "test-driver": "node scripts/test-driver.js",
+    "build-binaries": "pkg . --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --out-path bin/runix",
+    "debug": "ts-node src/index.ts run",
+    "debug:driver": "node scripts/test-driver.js",
+    "debug:watch": "ts-node-dev --respawn src/index.ts run",
+    "setup-env": "node scripts/setup-env.js",
+    "switch-env": "node scripts/switch-env.js",
+    "env:dev": "node -e \"require('fs').copyFileSync('.env.development', '.env')\" && echo \"Switched to development environment\"",
+    "env:test": "node -e \"require('fs').copyFileSync('.env.test', '.env')\" && echo \"Switched to test environment\"",
+    "env:prod": "node -e \"require('fs').copyFileSync('.env.production', '.env')\" && echo \"Switched to production environment\"",
+    "env:ci": "node -e \"require('fs').copyFileSync('.env.ci', '.env')\" && echo \"Switched to CI environment\"",
+    "fix-bat": "powershell -Command \"Copy-Item .\\scripts\\runix.bat .\\bin\\runix.bat -Force; .\\scripts\\fix-bat-permissions.ps1\"",
+    "postbuild-binaries": "npm run fix-bat",
+    "verify-drivers": "node scripts/verify-drivers.js",
+    "import-steps": "node scripts/import-driver-steps.js",
+    "prerun": "npm run verify-drivers"
+  },
+  "dependencies": {
+    "@cucumber/gherkin": "^26.0.0",
+    "@cucumber/messages": "^26.0.0",
+    "@types/ws": "^8.18.1",
+    "bullmq": "^5.51.1",
+    "dotenv": "^16.5.0",
+    "uuid": "^9.0.0",
+    "vscode-languageserver": "^8.0.2",
+    "vscode-languageserver-textdocument": "^1.0.8",
+    "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "@types/dotenv": "^8.2.3",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^18.15.11",
+    "@types/uuid": "^9.0.1",
+    "jest": "^29.5.0",
+    "pkg": "^5.8.0",
+    "playwright": "^1.35.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.0.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^4.0.0"
+  },
+  "peerDependencies": {
+    "playwright": "^1.35.0"
+  }
+}

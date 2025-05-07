@@ -1,0 +1,55 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Runix",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/src/index.ts",
+      "args": ["run", "${input:featureFile}", "--logLevel=DEBUG"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true,
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "preLaunchTask": "tsc: build - tsconfig.json"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Current Feature",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/src/index.ts",
+      "args": ["run", "${file}", "--logLevel=DEBUG"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true,
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "preLaunchTask": "tsc: build - tsconfig.json"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Driver",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/scripts/test-driver.js",
+      "args": ["${input:driverPath}"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "featureFile",
+      "type": "promptString",
+      "description": "Feature file path to run",
+      "default": "scenarios/example-driver.feature"
+    },
+    {
+      "id": "driverPath",
+      "type": "promptString",
+      "description": "Path to the driver directory",
+      "default": "drivers/example-driver"
+    }
+  ]
+}

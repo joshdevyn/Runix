@@ -1,0 +1,78 @@
+{
+  "name": "ExampleDriver",
+  "description": "Example driver for testing",
+  "version": "1.0.0",
+  "author": "Runix Team",
+  "license": "MIT",
+  "executable": "ExampleDriver.exe",
+  "protocol": "websocket",
+  "transport": "websocket",
+  "features": [
+    "execute",
+    "introspection"
+  ],
+  "actions": [
+    "echo",
+    "add",
+    "wait"
+  ],
+  "steps": [
+    {
+      "id": "echo-message",
+      "pattern": "echo the message (message)",
+      "description": "Echoes a message back",
+      "action": "echo",
+      "examples": [
+        "echo the message \"hello world\""
+      ],
+      "parameters": [
+        {
+          "name": "message",
+          "type": "string",
+          "description": "Message to echo",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "add-numbers",
+      "pattern": "add (a) and (b)",
+      "description": "Adds two numbers together",
+      "action": "add",
+      "examples": [
+        "add 2 and 3"
+      ],
+      "parameters": [
+        {
+          "name": "a",
+          "type": "number",
+          "description": "First number",
+          "required": true
+        },
+        {
+          "name": "b",
+          "type": "number",
+          "description": "Second number",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "wait-for",
+      "pattern": "wait for (milliseconds) milliseconds",
+      "description": "Waits for the specified number of milliseconds",
+      "action": "wait",
+      "examples": [
+        "wait for 1000 milliseconds"
+      ],
+      "parameters": [
+        {
+          "name": "milliseconds",
+          "type": "number",
+          "description": "Time to wait in milliseconds",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "name": "WebDriver",
+  "description": "Web browser automation driver",
+  "version": "1.0.0",
+  "author": "Runix Team",
+  "license": "MIT",
+  "executable": "webdriver",
+  "protocol": "websocket",
+  "features": ["execute", "introspection", "health-check"],
+  "actions": ["open", "click", "enterText", "waitForElement", "assertVisible", "assertText"],
+  "steps": [
+    {
+      "id": "open-browser",
+      "pattern": "open the browser at (url)",
+      "description": "Opens the browser at the specified URL",
+      "action": "open",
+      "examples": ["open the browser at \"https://example.com\""],
+      "parameters": [
+        {
+          "name": "url",
+          "description": "The URL to open",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "enter-text",
+      "pattern": "enter (text) into the (field) field",
+      "description": "Enters text into a field",
+      "action": "enterText",
+      "examples": ["enter \"admin\" into the \"username\" field"],
+      "parameters": [
+        {
+          "name": "text",
+          "description": "The text to enter",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "field",
+          "description": "The field selector",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "click-button",
+      "pattern": "click the (button) button",
+      "description": "Clicks on a button",
+      "action": "click",
+      "examples": ["click the \"login\" button"],
+      "parameters": [
+        {
+          "name": "button",
+          "description": "The button selector",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "assert-visible",
+      "pattern": "should see (text)",
+      "description": "Asserts that text is visible on the page",
+      "action": "assertVisible",
+      "examples": ["should see \"Welcome, admin\""],
+      "parameters": [
+        {
+          "name": "text",
+          "description": "The text to look for",
+          "type": "string",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "category": "web",
+  "tags": ["browser", "web", "automation"]
+}
