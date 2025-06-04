@@ -5,7 +5,7 @@
     <h3>Modern Automation Engine for Behavior-Driven Development</h3>
 </div>
 
-[![CI](https://github.com/user/runix/actions/workflows/ci.yml/badge.svg)](https://github.com/user/runix/actions/workflows/ci.yml)
+[![CI](https://icons.iconarchive.com/icons/simpleicons-team/simple/24/github-actions-icon.png)](https://github.com/user/runix/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![npm version](https://badge.fury.io/js/runix.svg)](https://badge.fury.io/js/runix)
 
