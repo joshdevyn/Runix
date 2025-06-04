@@ -1,47 +1,119 @@
 #!/usr/bin/env node
 
-const { execSync } = require('child_process');
+// Ensure execSync is imported along with spawn
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-console.log('Building ExampleDriver executable...');
+// Create structured logger for build scripts
+function createBuildLogger() {
+  const getCallerInfo = () => {
+    const stack = new Error().stack;
+    if (!stack) return 'unknown';
+    
+    const lines = stack.split('\n');
+    for (let i = 2; i < lines.length; i++) {
+      const line = lines[i];
+      const match = line.match(/at\s+(\w+)\s*\(/);
+      if (match) return match[1];
+    }
+    return 'unknown';
+  };
 
-// Create a simple wrapper script - single line with no formatting issues
-fs.writeFileSync(path.join(__dirname, 'driver.js'), "#!/usr/bin/env node\nconst port = process.env.RUNIX_DRIVER_PORT || process.argv.find(arg => arg.startsWith('--port='))?.replace('--port=', '') || process.argv[process.argv.indexOf('--port') + 1] || 8000;\nprocess.env.RUNIX_DRIVER_PORT = port;\nrequire('./index.js');");
-
-// Make sure driver.json has the right executable name
-try {
-  const driverJsonPath = path.join(__dirname, 'driver.json');
-  if (fs.existsSync(driverJsonPath)) {
-    const driverConfig = JSON.parse(fs.readFileSync(driverJsonPath, 'utf8'));
-    driverConfig.executable = 'ExampleDriver.exe';
-    fs.writeFileSync(driverJsonPath, JSON.stringify(driverConfig, null, 2));
-    console.log('Updated driver.json to use ExampleDriver.exe');
-  }
-} catch (err) {
-  console.error('Error updating driver.json:', err.message);
+  return {
+    log: (message, data = {}) => {
+      const caller = getCallerInfo();
+      const timestamp = new Date().toISOString();
+      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      console.log(`${timestamp} [INFO] [build.js::ExampleDriverBuilder::${caller}] ${message}${dataStr}`);
+    },
+    error: (message, data = {}) => {
+      const caller = getCallerInfo();
+      const timestamp = new Date().toISOString();
+      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      console.error(`${timestamp} [ERROR] [build.js::ExampleDriverBuilder::${caller}] ${message}${dataStr}`);
+    }
+  };
 }
 
-// Check if there's an existing ExampleDriver.exe before building
-if (fs.existsSync(path.join(__dirname, 'ExampleDriver.exe'))) {
-  console.log('Removing existing ExampleDriver.exe');
-  try {
-    fs.unlinkSync(path.join(__dirname, 'ExampleDriver.exe'));
-  } catch (err) {
-    console.error('Failed to remove existing executable:', err.message);
-    process.exit(1);
-  }
-}
+const logger = createBuildLogger();
 
-// Build the executable with pkg
-try {
-  console.log('Building ExampleDriver.exe with pkg...');
-  execSync('npx pkg . --output ExampleDriver.exe --targets node18-win-x64', {
-    cwd: __dirname,
-    stdio: 'inherit'
-  });
-  console.log('Successfully built ExampleDriver.exe');
-} catch (err) {
-  console.error('Failed to build executable:', err.message);
+logger.log('Building ExampleDriver...');
+
+// Validate we're in the right directory
+if (!fs.existsSync('package.json') || !fs.existsSync('driver.json')) {
+  logger.error('Error: Must run from example-driver directory with package.json and driver.json');
   process.exit(1);
+}
+
+// Read package.json to get the main entry point
+const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+const mainFile = packageJson.main || 'index.js';
+
+if (!fs.existsSync(mainFile)) {
+  logger.error(`Error: Main file ${mainFile} not found`);
+  process.exit(1);
+}
+
+// Create wrapper script for port handling
+const wrapperContent = `#!/usr/bin/env node
+// Get port from environment (assigned by Runix engine) or command line for standalone testing
+const port = (() => {
+  const envPort = process.env.RUNIX_DRIVER_PORT;
+  if (envPort) return envPort; // Engine assigned port takes precedence
+  
+  const portArg = process.argv.find(arg => arg.startsWith('--port='));
+  if (portArg) return portArg.replace('--port=', '');
+  const portIndex = process.argv.indexOf('--port');
+  if (portIndex !== -1 && process.argv[portIndex + 1]) return process.argv[portIndex + 1];
+  return '9000'; // Default for standalone testing
+})();
+
+// Validate port number
+const portNum = parseInt(port, 10);
+if (isNaN(portNum) || portNum < 1024 || portNum > 65535) {
+  console.error('Invalid port number:', port);
+  process.exit(1);
+}
+
+// Set the port in environment for the driver to use
+process.env.RUNIX_DRIVER_PORT = portNum.toString();
+require('./${mainFile}');
+`;
+
+fs.writeFileSync('driver.js', wrapperContent);
+logger.log('Created driver.js wrapper');
+
+// Build standalone executable
+const executableName = process.platform === 'win32' ? 'ExampleDriver.exe' : 'ExampleDriver';
+
+logger.log(`Building standalone executable: ${executableName}`);
+
+// Start of the main try block for the entire build and verification process
+try {
+    // Build standalone executable with correct target format
+    execSync('npm exec -- pkg driver.js --targets node18-win-x64 --output ExampleDriver.exe', { stdio: 'inherit' });
+    
+    logger.log(`✅ Successfully built ${executableName}`);
+    
+    // Verify executable exists
+    if (fs.existsSync(executableName)) {
+      logger.log(`📁 Executable size: ${Math.round(fs.statSync(executableName).size / 1024 / 1024)} MB`);
+      
+      // Update driver.json to reference the executable
+      const driverConfig = JSON.parse(fs.readFileSync('driver.json', 'utf8'));
+      driverConfig.executable = executableName;
+      fs.writeFileSync('driver.json', JSON.stringify(driverConfig, null, 2));
+      logger.log('✅ Updated driver.json executable reference');
+      
+      logger.log('\n🎉 ExampleDriver build complete!');
+      logger.log(`Standalone testing: ./${executableName} --port=9000`);
+      logger.log(`Engine usage: Port will be assigned automatically by Runix`);
+    } else {
+      logger.error('❌ Executable not found after build');
+      process.exit(1);
+    }
+} catch (error) {
+    logger.error('Error during build process', { error: error.message });
+    process.exit(1);
 }

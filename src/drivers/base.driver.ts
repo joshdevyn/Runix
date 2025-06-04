@@ -6,6 +6,7 @@ import {
   DriverInstance,
   StepExecutionResult
 } from './driver.interface';
+import { Logger } from '../utils/logger';
 
 /**
  * Base implementation of a driver instance
@@ -66,15 +67,49 @@ export class BaseDriverInstance extends EventEmitter implements DriverInstance {
  * Base class for implementing automation drivers
  */
 export abstract class BaseDriver implements AutomationDriver {
-  abstract getCapabilities(): DriverCapabilities;
+  protected log: Logger;
+  protected initialized: boolean = false;
+  
+  constructor() {
+    this.log = Logger.getInstance().createChildLogger({
+      component: this.constructor.name
+    });
+  }
   
   async initialize(config: DriverConfig): Promise<void> {
-    // Default implementation - can be overridden by subclasses
+    // Validate configuration
+    if (config && typeof config !== 'object') {
+      throw new Error('Driver configuration must be an object');
+    }
+    
+    this.log.debug('Base driver initialization', { config });
+    this.initialized = true;
   }
+  
+  abstract getCapabilities(): DriverCapabilities;
   
   abstract execute(action: string, args: any[]): Promise<StepExecutionResult>;
   
   async shutdown(): Promise<void> {
-    // Default implementation - can be overridden by subclasses
+    this.log.debug('Base driver shutdown');
+    this.initialized = false;
+  }
+  
+  protected validateInitialized(): void {
+    if (!this.initialized) {
+      throw new Error('Driver not initialized');
+    }
+  }
+  
+  protected validateAction(action: string): void {
+    if (!action || typeof action !== 'string' || action.trim().length === 0) {
+      throw new Error('Action must be a non-empty string');
+    }
+  }
+  
+  protected validateArgs(args: any[]): void {
+    if (!Array.isArray(args)) {
+      throw new Error('Arguments must be an array');
+    }
   }
 }

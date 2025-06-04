@@ -1,10 +1,25 @@
 const WebSocket = require('ws');
 const http = require('http');
 const url = require('url');
-const port = process.env.RUNIX_DRIVER_PORT || 8000;
+
+// Get port from environment variable (assigned by engine) or use default for standalone
+const port = parseInt(process.env.RUNIX_DRIVER_PORT || '9000', 10);
 const manifest = require('./driver.json');
 
-console.log(`Example Driver starting on port ${port}`);
+// Simple logger for driver processes
+function log(message, ...args) {
+  const timestamp = new Date().toISOString();
+  const argsStr = args.length > 0 ? ` ${JSON.stringify(args)}` : '';
+  console.log(`${timestamp} [INFO] [index.js::ExampleDriver::handleMessage] ${message}${argsStr}`);
+}
+
+function logError(message, ...args) {
+  const timestamp = new Date().toISOString();
+  const argsStr = args.length > 0 ? ` ${JSON.stringify(args)}` : '';
+  console.error(`${timestamp} [ERROR] [index.js::ExampleDriver::handleMessage] ${message}${argsStr}`);
+}
+
+log(`Example Driver starting on port ${port}`);
 
 // Create HTTP server and WebSocket server
 const server = http.createServer((req, res) => {
@@ -22,20 +37,21 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 
 wss.on('connection', function connection(ws) {
-  console.log('Client connected');
+  log('Client connected');
   
   ws.on('message', function incoming(message) {
-    console.log(`Received: ${message}`);
+    log(`Received: ${message}`);
     handleMessage(ws, message);
   });
   
   ws.on('close', function() {
-    console.log('Client disconnected');
+    log('Client disconnected');
   });
 });
 
-server.listen(port, () => {
-  console.log(`Example driver listening on port ${port}`);
+server.listen(port, '127.0.0.1', () => {
+  log(`Example driver listening on 127.0.0.1:${port}`);
+  log(`WebSocket server ready for connections`);
 });
 
 // Handle incoming messages
@@ -45,7 +61,7 @@ function handleMessage(ws, message) {
     handleRequest(request).then(response => {
       ws.send(JSON.stringify(response));
     }).catch(err => {
-      console.error('Error handling request:', err);
+      logError('Error handling request:', err);
       ws.send(JSON.stringify({
         id: request.id || '0',
         type: 'response',
@@ -56,7 +72,7 @@ function handleMessage(ws, message) {
       }));
     });
   } catch (err) {
-    console.error('Error parsing message:', err);
+    logError('Error parsing message:', err);
   }
 }
 
@@ -89,17 +105,18 @@ async function handleRequest(request) {
         };
 
       case 'initialize':
-        // …existing init logic…
+        // Initialize with config from params
+        const config = request.params?.config || {};
+        log('Driver initialized with config', config);
         return sendSuccessResponse(request.id, { initialized: true });
 
       case 'introspect':
-        return handleIntrospect(request.id, 'steps');
+        return handleIntrospect(request.id, request.params?.type || 'steps');
 
       case 'execute':
         return handleExecute(request.id, request.params?.action, request.params?.args || []);
 
       case 'health':
-        // return top-level status to satisfy DriverRegistry.checkWebSocketHealth
         return {
           id: request.id,
           type: 'response',
@@ -120,13 +137,12 @@ async function handleRequest(request) {
 
 // Handle execute requests
 async function handleExecute(id, action, args) {
-  console.log(`Executing action: ${action}`, args);
+  log(`Executing action: ${action}`, args);
   
   switch (action) {
-    // support engine’s introspection call
-    case 'introspect/steps':
-      return handleIntrospect(id, 'steps');
-
+    case 'introspect':
+      const introspectParams = args[0] || {};
+      return handleIntrospect(id, introspectParams.type || 'steps');
     case 'echo':
       return {
         id,
@@ -138,7 +154,6 @@ async function handleExecute(id, action, args) {
           }
         }
       };
-    
     case 'add':
       const sum = Number(args[0]) + Number(args[1]);
       return {
@@ -152,11 +167,10 @@ async function handleExecute(id, action, args) {
           }
         }
       };
-    
     case 'wait':
       return new Promise((resolve) => {
         const ms = Number(args[0]);
-        console.log(`Waiting for ${ms}ms`);
+        log(`Waiting for ${ms}ms`);
         setTimeout(() => {
           resolve({
             id,
@@ -170,7 +184,6 @@ async function handleExecute(id, action, args) {
           });
         }, ms);
       });
-    
     default:
       return {
         id,
@@ -193,7 +206,7 @@ function handleIntrospect(id, type) {
         steps: [
           {
             id: "echo-message",
-            pattern: "echo the message (message)",
+            pattern: "echo the message \"(.*)\"",
             description: "Echoes a message back",
             action: "echo",
             examples: ["echo the message \"hello world\""],
@@ -208,7 +221,7 @@ function handleIntrospect(id, type) {
           },
           {
             id: "add-numbers",
-            pattern: "add (a) and (b)",
+            pattern: "add (\\d+) and (\\d+)",
             description: "Adds two numbers together",
             action: "add",
             examples: ["add 2 and 3"],
@@ -229,7 +242,7 @@ function handleIntrospect(id, type) {
           },
           {
             id: "wait-for",
-            pattern: "wait for (milliseconds) milliseconds",
+            pattern: "wait for (\\d+) milliseconds",
             description: "Waits for the specified number of milliseconds",
             action: "wait",
             examples: ["wait for 1000 milliseconds"],

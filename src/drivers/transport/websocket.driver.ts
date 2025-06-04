@@ -1,199 +1,163 @@
 import WebSocket from 'ws';
-import { v4 as uuidv4 } from 'uuid';
-import { BaseDriverInstance } from '../base.driver';
-import { DriverCapabilities, DriverConfig, StepExecutionResult } from '../driver.interface';
+import { Logger } from '../../utils/logger';
 import { DriverMetadata } from '../driverRegistry';
+import { DriverStartupError, DriverCommunicationError } from '../../utils/errors';
 
-interface WebSocketRequest {
-  id: string;
-  type: 'request';
-  method: string;
-  params?: any;
-}
-
-interface WebSocketResponse {
-  id: string;
-  type: 'response';
-  result?: any;
-  error?: {
-    code: number;
-    message: string;
-    details?: any;
-  };
-}
-
-/**
- * WebSocket implementation of a driver instance
- */
-export class WebSocketDriverInstance extends BaseDriverInstance {
+export class WebSocketDriverInstance {
   private ws: WebSocket | null = null;
-  private pendingRequests: Map<string, { 
-    resolve: (value: any) => void;
-    reject: (reason: any) => void;
-    timeout: NodeJS.Timeout;
-  }> = new Map();
-  private driverMetadata: DriverMetadata;
+  private log: Logger;
+  private metadata: DriverMetadata;
   private port: number;
-  private requestTimeout = 30000; // 30 seconds
-  
-  constructor(driverMetadata: DriverMetadata, port: number) {
-    super({
-      getCapabilities: () => ({
-        name: driverMetadata.name,
-        version: driverMetadata.version,
-        description: driverMetadata.description,
-        author: driverMetadata.author,
-        supportedActions: driverMetadata.supportedActions
-      }),
-      initialize: async () => {},
-      execute: async () => ({ success: false, error: { message: 'Not connected to driver' } }),
-      shutdown: async () => {}
-    });
-    
-    this.driverMetadata = driverMetadata;
+  private connected = false;
+
+  constructor(metadata: DriverMetadata, port: number) {
+    this.metadata = metadata;
     this.port = port;
-  }
-  
-  async start(): Promise<DriverCapabilities> {
-    if (this.ws) {
-      return super.start();
-    }
-    
-    return new Promise<DriverCapabilities>((resolve, reject) => {
-      // Connect to the driver
-      const wsUrl = this.driverMetadata.endpoint || `ws://localhost:${this.port}`;
-      console.log(`Connecting to driver at ${wsUrl}`);
-      
-      this.ws = new WebSocket(wsUrl);
-      
-      this.ws.on('open', async () => {
-        console.log(`Connected to driver at ${wsUrl}`);
-        
-        try {
-          // Get capabilities
-          const capabilities = await this.sendRequest('capabilities', {});
-          this.isRunning = true;
-          resolve(capabilities);
-        } catch (err) {
-          reject(err);
-        }
-      });
-      
-      this.ws.on('message', (data: WebSocket.Data) => {
-        try {
-          const response: WebSocketResponse = JSON.parse(data.toString());
-          this.handleResponse(response);
-        } catch (err) {
-          console.error('Error parsing driver response:', err);
-        }
-      });
-      
-      this.ws.on('error', (err) => {
-        console.error('WebSocket error:', err);
-        reject(err);
-      });
-      
-      this.ws.on('close', (code, reason) => {
-        console.log(`WebSocket closed: ${code} - ${reason}`);
-        this.isRunning = false;
-        this.ws = null;
-        
-        // Reject all pending requests
-        for (const [id, { reject }] of this.pendingRequests) {
-          reject(new Error(`WebSocket closed: ${code} - ${reason}`));
-          this.pendingRequests.delete(id);
-        }
-      });
+    this.log = Logger.getInstance().createChildLogger({
+      component: 'WebSocketDriver',
+      driverId: metadata.id
     });
   }
-  
-  async initialize(config: DriverConfig): Promise<void> {
-    await this.sendRequest('initialize', { config });
-    this.config = config;
-  }
-  
-  async execute(action: string, args: any[]): Promise<StepExecutionResult> {
-    try {
-      return await this.sendRequest('execute', { action, args });
-    } catch (err) {
-      return {
-        success: false,
-        error: {
-          message: err instanceof Error ? err.message : String(err)
-        }
-      };
-    }
-  }
-  
-  async shutdown(): Promise<void> {
-    if (!this.isRunning || !this.ws) {
-      return;
-    }
+
+  async start(): Promise<any> {
+    const traceId = this.log.startTrace('websocket-driver-start');
     
     try {
-      await this.sendRequest('shutdown', {});
-    } catch (err) {
-      console.error('Error shutting down driver:', err);
+      const url = `ws://127.0.0.1:${this.port}`;
+      this.log.debug('Connecting to driver via WebSocket', { traceId, url, port: this.port });
+      
+      this.ws = new WebSocket(url);
+      
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          this.log.error('WebSocket connection timeout', { traceId, url, port: this.port });
+          if (this.ws) {
+            this.ws.terminate();
+          }
+          reject(new Error(`WebSocket connection timeout to ${url}`));
+        }, 10000);
+
+        this.ws!.on('open', () => {
+          clearTimeout(timeout);
+          this.connected = true;
+          this.log.debug('WebSocket connection established', { traceId, url, port: this.port });
+          resolve(void 0);
+        });
+
+        this.ws!.on('error', (error) => {
+          clearTimeout(timeout);
+          this.log.error('WebSocket connection error', { traceId, url, port: this.port }, error);
+          reject(new Error(`Failed to connect to driver at ${url}: ${error.message}`));
+        });
+      });
+
+      // Get capabilities using the correct JSON-RPC method call
+      const capabilities = await this.callMethod('capabilities', {});
+      this.log.info('Driver capabilities received', { traceId, port: this.port }, capabilities);
+      
+      return capabilities;
+
+    } catch (error) {
+      this.log.error('Failed to start WebSocket driver', { traceId, port: this.port }, error);
+      throw error;
     } finally {
-      this.isRunning = false;
-      this.ws.close();
-      this.ws = null;
+      this.log.endTrace(traceId);
     }
   }
-  
+
+  async initialize(config: any): Promise<void> {
+    const traceId = this.log.startTrace('websocket-driver-initialize');
+    
+    try {
+      this.log.debug('Initializing driver with config', { traceId }, config);
+      await this.callMethod('initialize', { config });
+      this.log.debug('Driver initialization complete', { traceId });
+    } finally {
+      this.log.endTrace(traceId);
+    }
+  }
+
+  async execute(action: string, args: any[]): Promise<any> {
+    if (!this.connected || !this.ws) {
+      throw new DriverCommunicationError(this.metadata.id, action, {
+        port: this.port
+      });
+    }
+
+    return this.callMethod('execute', { action, args });
+  }
+
   /**
-   * Send a request to the driver and wait for a response
+   * Call a JSON-RPC method on the driver
    */
-  private sendRequest<T = any>(method: string, params: any): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      if (!this.ws) {
-        reject(new Error('Not connected to driver'));
-        return;
-      }
-      
-      const id = uuidv4();
-      const request: WebSocketRequest = {
-        id,
+  private async callMethod(method: string, params: any): Promise<any> {
+    if (!this.connected || !this.ws) {
+      throw new DriverCommunicationError(this.metadata.id, method, {
+        port: this.port
+      });
+    }
+
+    return new Promise((resolve, reject) => {
+      const requestId = Math.random().toString(36).substring(2);
+      const message = {
+        id: requestId,
         type: 'request',
-        method,
-        params
+        method: method,
+        params: params
       };
-      
-      // Set a timeout for the request
+
       const timeout = setTimeout(() => {
-        if (this.pendingRequests.has(id)) {
-          this.pendingRequests.delete(id);
-          reject(new Error(`Request timed out: ${method}`));
+        reject(new Error(`Request timeout for method: ${method}`));
+      }, 30000);
+
+      const messageHandler = (data: WebSocket.Data) => {
+        try {
+          const response = JSON.parse(data.toString());
+          if (response.id === requestId) {
+            clearTimeout(timeout);
+            if (this.ws) {
+              this.ws.off('message', messageHandler);
+            }
+            
+            if (response.result !== undefined) {
+              resolve(response.result);
+            } else if (response.error) {
+              reject(new Error(response.error.message || 'Unknown error'));
+            } else {
+              resolve(response);
+            }
+          }
+        } catch (error) {
+          // Ignore parsing errors for other messages
         }
-      }, this.requestTimeout);
-      
-      // Store the request callbacks
-      this.pendingRequests.set(id, { resolve, reject, timeout });
-      
-      // Send the request
-      this.ws.send(JSON.stringify(request));
+      };
+
+      if (this.ws) {
+        this.ws.on('message', messageHandler);
+        this.ws.send(JSON.stringify(message));
+      } else {
+        clearTimeout(timeout);
+        reject(new Error('WebSocket connection is null'));
+      }
     });
   }
-  
-  /**
-   * Handle a response from the driver
-   */
-  private handleResponse(response: WebSocketResponse): void {
-    const { id, result, error } = response;
+
+  async stop(): Promise<void> {
+    const traceId = this.log.startTrace('websocket-driver-stop');
     
-    if (!id || !this.pendingRequests.has(id)) {
-      console.warn('Received response for unknown request:', response);
-      return;
+    try {
+      if (this.ws) {
+        this.ws.close();
+        this.ws = null;
+        this.connected = false;
+      }
+      this.log.debug('WebSocket driver stopped', { traceId });
+    } finally {
+      this.log.endTrace(traceId);
     }
-    
-    const { resolve, reject, timeout } = this.pendingRequests.get(id)!;
-    this.pendingRequests.delete(id);
-    clearTimeout(timeout);
-    
-    if (error) {
-      reject(new Error(error.message));
-    } else {
-      resolve(result);
-    }
+  }
+
+  async shutdown(): Promise<void> {
+    return this.stop();
   }
 }

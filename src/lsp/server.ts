@@ -25,25 +25,36 @@ import * as path from 'path';
 import { parseFeatureFile, parseFeatureAst } from '../parser/parser';
 import { DriverRegistry, StepDefinition } from '../drivers/driverRegistry';
 import { DriverIntrospectionService } from './driverIntrospection';
+import { Logger } from '../utils/logger';
 
 // Create connection and documents
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
+const logger = Logger.getInstance();
 let stepDefinitions: StepDefinition[] = [];
 
 // Initialize the language server
 connection.onInitialize(async (params: InitializeParams) => {
-  console.log('Runix language server initializing...');
+  logger.info('Runix language server initializing...');
 
   // Load all drivers
-  const registry = DriverRegistry.getInstance();
-  await registry.discoverDrivers();
+  const driverRegistry = DriverRegistry.getInstance();
+  try {
+    await driverRegistry.initialize(); // This will call discoverDrivers internally
+  } catch (error) {
+    logger.error('Failed to initialize LSP driver registry', { 
+      class: 'LSPServer',
+      method: 'onInitialize' 
+    }, error);
+  }
 
   // Get step definitions from all drivers
   const introspectionService = DriverIntrospectionService.getInstance();
   stepDefinitions = await introspectionService.getAllStepDefinitions();
 
-  console.log(`Loaded ${stepDefinitions.length} step definitions from ${registry.getAllDrivers().length} drivers`);
+  // Fix: Use listDriverIds() instead of getAllDrivers()
+  const driverIds = driverRegistry.listDriverIds();
+  logger.info(`Loaded ${stepDefinitions.length} step definitions from ${driverIds.length} drivers`);
 
   return {
     capabilities: {
@@ -106,201 +117,112 @@ documents.onDidChangeContent(async (change: { document: TextDocument }) => {
       source: 'runix-lsp'
     });
   }
-
+  
   connection.sendDiagnostics({ uri: document.uri, diagnostics });
 });
 
-// Provide step suggestions for completion
-connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] => {
-  const document = documents.get(params.textDocument.uri);
+// Handle completion requests
+connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams): Promise<CompletionItem[]> => {
+  const document = documents.get(textDocumentPosition.textDocument.uri);
   if (!document || !isFeatureFile(document.uri)) {
     return [];
   }
+  
+  const position = textDocumentPosition.position;
+  const text = document.getText();
+  const lines = text.split('\n');
+  const currentLine = lines[position.line] || '';
+  
+  // Check if we're in a step line
+  if (isStepLine(currentLine)) {
+    return getStepCompletions();
+  }
+  
+  return [];
+});
 
+// Handle hover requests
+connection.onHover(async (params: HoverParams): Promise<Hover | null> => {
+  const document = documents.get(params.textDocument.uri);
+  if (!document || !isFeatureFile(document.uri)) {
+    return null;
+  }
+  
   const position = params.position;
-  const lineText = document.getText({
-    start: { line: position.line, character: 0 },
-    end: { line: position.line, character: position.character }
-  });
-
-  // Check if we're in a step context (after Given, When, Then, And, But)
-  const stepKeywords = ['Given', 'When', 'Then', 'And', 'But'];
-  const isInStepContext = stepKeywords.some(keyword =>
-    lineText.trim().startsWith(keyword) && lineText.includes(keyword + ' ')
-  );
-
-  if (!isInStepContext) {
-    return [];
-  }
-
-  // Return completion items for step definitions
-  return stepDefinitions.map(step => {
-    const labelParts: string[] = step.pattern.split(/(\(.+?\))/g);
-    const label = labelParts.map((part: string) => {
-      if (part.startsWith('(') && part.endsWith(')')) {
-        return `"${part.substring(1, part.length - 1)}"`;
-      }
-      return part;
-    }).join('');
-
-    return {
-      label,
-      kind: CompletionItemKind.Function,
-      detail: `${step.description} (${findDriverNameForStep(step)})`,
-      documentation: {
+  const text = document.getText();
+  const lines = text.split('\n');
+  const currentLine = lines[position.line] || '';
+  
+  if (isStepLine(currentLine)) {
+    const stepText = extractStepText(currentLine);
+    const matchingStep = findMatchingStepDefinition(stepText);
+    
+    if (matchingStep) {
+      const contents: MarkupContent = {
         kind: MarkupKind.Markdown,
-        value: generateStepDocumentation(step)
-      }
-    };
-  });
-});
-
-// Provide hover information
-connection.onHover((params: HoverParams): Hover | null => {
-  const document = documents.get(params.textDocument.uri);
-  if (!document || !isFeatureFile(document.uri)) {
-    return null;
-  }
-
-  // Get the step at the current position
-  const step = getStepAtPosition(document, params.position);
-  if (!step) {
-    return null;
-  }
-
-  // Find matching step definition
-  const matchingStep = findMatchingStepDefinition(step);
-  if (!matchingStep) {
-    return null;
-  }
-
-  const driverName = findDriverNameForStep(matchingStep);
-
-  // Return hover information
-  return {
-    contents: {
-      kind: MarkupKind.Markdown,
-      value: generateStepDocumentation(matchingStep, true, driverName)
+        value: `**${matchingStep.description}**\n\nAction: \`${matchingStep.action}\`\n\nPattern: \`${matchingStep.pattern}\``
+      };
+      
+      return {
+        contents,
+        range: {
+          start: { line: position.line, character: 0 },
+          end: { line: position.line, character: currentLine.length }
+        }
+      };
     }
-  };
-});
-
-// Provide go to definition
-connection.onDefinition((params: TextDocumentPositionParams): Definition | null => {
-  const document = documents.get(params.textDocument.uri);
-  if (!document || !isFeatureFile(document.uri)) {
-    return null;
   }
-
-  // Get the step at the current position
-  const step = getStepAtPosition(document, params.position);
-  if (!step) {
-    return null;
-  }
-
-  // For now, we don't have actual definition locations
-  // In a real implementation, we would return the location of the step definition
+  
   return null;
 });
 
-// Helper function to check if file is a feature file
+// Handle definition requests
+connection.onDefinition(async (params: TextDocumentPositionParams): Promise<Definition | null> => {
+  // Implementation for go-to-definition
+  return null;
+});
+
+// Helper functions
 function isFeatureFile(uri: string): boolean {
-  return uri.endsWith('.feature') || uri.endsWith('.spec');
+  return uri.endsWith('.feature');
 }
 
-// Helper function to find matching step definition
-function findMatchingStepDefinition(stepText: string): StepDefinition | undefined {
+function isStepLine(line: string): boolean {
+  const trimmed = line.trim();
+  return /^(Given|When|Then|And|But)\s+/.test(trimmed);
+}
+
+function extractStepText(line: string): string {
+  const match = line.trim().match(/^(Given|When|Then|And|But)\s+(.+)$/);
+  return match ? match[2] : '';
+}
+
+function findMatchingStepDefinition(stepText: string): any {
   for (const step of stepDefinitions) {
-    // Convert pattern to regex for matching
-    const patternRegex = convertPatternToRegex(step.pattern);
-    if (patternRegex.test(stepText)) {
+    if (matchesStepPattern(stepText, step.pattern)) {
       return step;
     }
   }
-  return undefined;
-}
-
-// Helper function to convert step pattern to regex
-function convertPatternToRegex(pattern: string): RegExp {
-  // Replace parameter placeholders with regex groups
-  let regexPattern = pattern
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)')
-    .replace(/\[/g, '\\[')
-    .replace(/\]/g, '\\]')
-    .replace(/\{/g, '\\{')
-    .replace(/\}/g, '\\}')
-    .replace(/\./g, '\\.')
-    .replace(/\?/g, '\\?')
-    .replace(/\+/g, '\\+')
-    .replace(/\*/g, '\\*')
-    .replace(/\$/g, '\\$')
-    .replace(/\^/g, '\\^');
-
-  // Replace parameter placeholders with regex patterns
-  regexPattern = regexPattern.replace(/"\(.*?\)"/g, '".*?"');
-
-  return new RegExp(`^${regexPattern}$`);
-}
-
-// Helper function to find driver name for a step
-function findDriverNameForStep(step: StepDefinition): string {
-  for (const driver of DriverRegistry.getInstance().getAllDrivers()) {
-    if (driver.supportedSteps?.some(s => s.id === step.id)) {
-      return driver.name;
-    }
-  }
-  return 'Unknown Driver';
-}
-
-// Helper function to get step text at position
-function getStepAtPosition(document: TextDocument, position: Position): string | null {
-  const lineText = document.getText({
-    start: { line: position.line, character: 0 },
-    end: { line: position.line, character: Number.MAX_SAFE_INTEGER }
-  }).trim();
-
-  // Check if the line is a step
-  const stepKeywords = ['Given', 'When', 'Then', 'And', 'But'];
-  for (const keyword of stepKeywords) {
-    if (lineText.startsWith(keyword + ' ')) {
-      return lineText.substring(keyword.length).trim();
-    }
-  }
-
   return null;
 }
 
-// Helper function to generate step documentation
-function generateStepDocumentation(step: StepDefinition, includeExamples: boolean = true, driverName: string = ''): string {
-  let doc = `### ${step.description}\n\n`;
-
-  if (driverName) {
-    doc += `**Driver:** ${driverName}\n\n`;
-  }
-
-  doc += `**Pattern:** \`${step.pattern}\`\n\n`;
-
-  if (step.parameters && step.parameters.length > 0) {
-    doc += '**Parameters:**\n\n';
-    for (const param of step.parameters) {
-      const defaultValue = param.default !== undefined ? ` (default: ${param.default})` : '';
-      const required = param.required ? ' (required)' : '';
-      doc += `- \`${param.name}\`: ${param.description} - ${param.type}${required}${defaultValue}\n`;
-    }
-    doc += '\n';
-  }
-
-  if (includeExamples && step.examples && step.examples.length > 0) {
-    doc += '**Examples:**\n\n';
-    for (const example of step.examples) {
-      doc += `- ${example}\n`;
-    }
-  }
-
-  return doc;
+function matchesStepPattern(stepText: string, pattern: string): boolean {
+  const regexPattern = pattern.replace(/\(([^)]+)\)/g, '(.+?)');
+  const regex = new RegExp(`^${regexPattern}$`, 'i');
+  return regex.test(stepText);
 }
 
-// Start the server
+function getStepCompletions(): CompletionItem[] {
+  return stepDefinitions.map(step => ({
+    label: step.pattern,
+    kind: CompletionItemKind.Function,
+    detail: step.description || step.pattern,
+    // Remove: documentation: step.examples?.join('\n'),
+    documentation: step.description || `Action: ${step.action}`,
+    insertText: step.pattern
+  }));
+}
+
+// Start listening
 documents.listen(connection);
 connection.listen();

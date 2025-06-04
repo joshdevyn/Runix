@@ -6,18 +6,26 @@ vars:
   DRIVERS_DIR: drivers
   BIN_DIR: bin
   BINARY_DIR: 'bin/runix'
+  ROOT_DIR: '{{.PWD}}'
+  SCENARIO_DIR: tests/scenarios
+  LOG_DIR: logs
+  SCREENSHOT_DIR: screenshots
 
 tasks:
   default:
-    desc: Display available tasks
+    desc: "Default task: Runs the full quickstart process (setup, build-all, verify-drivers, run example)."
     cmds:
-      - task -l
+      - task: quickstart
 
   # Build tasks
   build:
     desc: Build the Runix project
     cmds:
       - npm run build
+      - cmd: powershell -Command "if (Test-Path .env) { Copy-Item .env {{.DIST_DIR}}/ -Force }"
+        platforms: [windows]
+      - cmd: if [ -f .env ]; then cp .env {{.DIST_DIR}}/; fi
+        platforms: [darwin, linux]
     sources:
       - src/**/*.ts
     generates:
@@ -63,7 +71,6 @@ tasks:
       - cmd: npm run build-binaries
         platforms: [darwin, linux]
       # Build the drivers as executables
-      - echo "Building driver executables..."
       - task: build-drivers
 
   build-drivers:
@@ -72,15 +79,44 @@ tasks:
       - echo "Building driver executables..."
       # Build the example driver in its own directory first
       - task: build-example-driver
-      # Ensure the driver directory exists in bin directory
+      # Build the web driver
+      - task: build-web-driver
+      # Ensure the driver directory exists in bin directory (Windows)
       - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path {{.BIN_DIR}}/drivers/example-driver | Out-Null"
         platforms: [windows]
-      # Copy the built executable and necessary files to bin directory
+      # Copy the built executable and necessary files to bin directory (Windows)
       - cmd: powershell -Command "if (Test-Path {{.DRIVERS_DIR}}/example-driver/ExampleDriver.exe) { Copy-Item {{.DRIVERS_DIR}}/example-driver/ExampleDriver.exe {{.BIN_DIR}}/drivers/example-driver/ -Force }"
         platforms: [windows]
       - cmd: powershell -Command "if (Test-Path {{.DRIVERS_DIR}}/example-driver/driver.json) { Copy-Item {{.DRIVERS_DIR}}/example-driver/driver.json {{.BIN_DIR}}/drivers/example-driver/ -Force }"
         platforms: [windows]
-      # For other platforms
+      
+      # Web driver installation (Windows)
+      - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path {{.BIN_DIR}}/drivers/web-driver | Out-Null"
+        platforms: [windows]
+      - cmd: powershell -Command "Copy-Item {{.DRIVERS_DIR}}/web-driver/WebDriver.exe {{.BIN_DIR}}/drivers/web-driver/ -Force"
+        platforms: [windows]
+      - cmd: powershell -Command "Copy-Item {{.DRIVERS_DIR}}/web-driver/driver.json {{.BIN_DIR}}/drivers/web-driver/ -Force"
+        platforms: [windows]
+      
+      # Ensure the driver directory exists in bin directory (Darwin/Linux)
+      - cmd: mkdir -p {{.BIN_DIR}}/drivers/example-driver
+        platforms: [darwin, linux]
+      # Copy the built executable and necessary files to bin directory (Darwin/Linux)
+      # Note: 'ExampleDriver' is the non-Windows executable name produced by build.js
+      - cmd: cp {{.DRIVERS_DIR}}/example-driver/ExampleDriver {{.BIN_DIR}}/drivers/example-driver/ExampleDriver
+        platforms: [darwin, linux]
+      - cmd: cp {{.DRIVERS_DIR}}/example-driver/driver.json {{.BIN_DIR}}/drivers/example-driver/driver.json
+        platforms: [darwin, linux]
+
+      # Web driver installation (Darwin/Linux)
+      - cmd: mkdir -p {{.BIN_DIR}}/drivers/web-driver
+        platforms: [darwin, linux]
+      - cmd: cp {{.DRIVERS_DIR}}/web-driver/WebDriver {{.BIN_DIR}}/drivers/web-driver/WebDriver
+        platforms: [darwin, linux]
+      - cmd: cp {{.DRIVERS_DIR}}/web-driver/driver.json {{.BIN_DIR}}/drivers/web-driver/driver.json
+        platforms: [darwin, linux]
+
+      # Generic script for other drivers or further processing (if any)
       - cmd: bash scripts/build-drivers.sh {{.DRIVERS_DIR}} {{.BIN_DIR}}
         platforms: [darwin, linux]
       - echo "All driver executables built and installed"
@@ -92,6 +128,15 @@ tasks:
       - cmd: powershell -Command "Push-Location {{.DRIVERS_DIR}}/example-driver; npm install; npm run build; Pop-Location"
         platforms: [windows]
       - cmd: cd {{.DRIVERS_DIR}}/example-driver && npm install && npm run build && cd -
+        platforms: [darwin, linux]
+
+  build-web-driver:
+    desc: Build only the web driver executable
+    cmds:
+      - echo "Building web driver in {{.DRIVERS_DIR}}/web-driver"
+      - cmd: powershell -Command "Push-Location {{.DRIVERS_DIR}}/web-driver; if (!(Test-Path package.json)) { npm init -y }; npm install playwright ws --omit=dev; npm run build; Pop-Location"
+        platforms: [windows]
+      - cmd: cd {{.DRIVERS_DIR}}/web-driver && if [ ! -f package.json ]; then npm init -y; fi && npm install playwright ws --omit=dev && npm run build && cd -
         platforms: [darwin, linux]
 
   # Test tasks
@@ -115,6 +160,11 @@ tasks:
     cmds:
       - jest --testPathPattern=tests/e2e
       
+  test:coverage:
+    desc: Run tests with coverage
+    cmds:
+      - jest --coverage
+
   verify-drivers:
     desc: Verify that drivers are correctly installed and accessible
     cmds:
@@ -172,12 +222,12 @@ tasks:
   run:example:
     desc: Run the example feature
     cmds:
-      - ts-node src/index.ts run scenarios/example.feature
+      - ts-node src/index.ts run {{.SCENARIO_DIR}}/example.feature
 
   run:driver-example:
     desc: Run the example driver feature
     cmds:
-      - ts-node src/index.ts run scenarios/example-driver.feature
+      - ts-node src/index.ts run {{.SCENARIO_DIR}}/example-driver.feature
 
   run:driver-example:with-port:
     desc: Run the example driver feature with a specific port
@@ -186,7 +236,7 @@ tasks:
         vars:
           PORT: "{{.PORT}}"
           FEATURE_PATH: scenarios/example-driver.feature
-          DRIVER: exampledriver
+          DRIVER: example-driver
     requires:
       vars: [PORT]
 
@@ -227,7 +277,14 @@ tasks:
         platforms: [windows]
       - cmd: mkdir -p {{.REPORTS_DIR}}
         platforms: [darwin, linux]
-      - powershell -Command "if (!(Test-Path logs)) { New-Item -ItemType Directory -Force -Path logs }"
+      - cmd: powershell -Command "if (!(Test-Path logs)) { New-Item -ItemType Directory -Force -Path logs }"
+        platforms: [windows]
+      - cmd: mkdir -p logs
+        platforms: [darwin, linux]
+      - cmd: powershell -Command "if (!(Test-Path screenshots)) { New-Item -ItemType Directory -Force -Path screenshots }"
+        platforms: [windows]
+      - cmd: mkdir -p screenshots
+        platforms: [darwin, linux]
 
   # Driver development workflow
   driver:dev:
@@ -248,49 +305,140 @@ tasks:
 
   # Quick start for new users
   quickstart:
-    desc: Setup, build and run example
+    desc: "Runs the full quickstart process: setup, build, and run comprehensive examples"
+    deps: [setup, build-all, verify-drivers]
     cmds:
       - echo "Starting Runix quickstart process"
-      - task: setup
-      - task: build-all
-      - task: verify-drivers
-      - echo "Running example scenario"
-      # ▶ inline the env-var as an absolute path so the .exe is found
-      - cmd: 'cmd /C "set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run scenarios\example-driver.feature --driver=exampledriver --driverConfig={\"timeout\":30000}"'
+      - echo "All components built successfully!"
+      - echo ""
+      - echo "🚀 Running comprehensive demonstration..."
+      - echo "📋 This includes both microservices and web automation examples"
+      - echo ""
+      - echo "1️⃣  Running example scenario with microservices architecture"
+      - cmd: cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_PORT=8090&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run tests/scenarios\example-driver.feature --driver=example-driver --driverConfig={\"timeout\":30000}"
         platforms: [windows]
-      - cmd: RUNIX_DRIVER_DIR=bin/drivers ./bin/run-runix run scenarios/example-driver.feature --driver=exampledriver --driverConfig='{\"timeout\":30000}'
+      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_PORT=8090 RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run tests/scenarios/example-driver.feature --driver=example-driver --driverConfig='{\"timeout\":30000}'
         platforms: [darwin, linux]
-      - echo "Quickstart complete"
+      - echo ""
+      - echo "2️⃣  Running comprehensive web automation demo..."
+      - cmd: cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run tests/scenarios\web-comprehensive-demo.feature --driver=web-driver --driverConfig={\"headless\":false,\"screenshotDir\":\"screenshots\"}"
+        platforms: [windows]
+      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run tests/scenarios/web-comprehensive-demo.feature --driver=web-driver --driverConfig='{\"headless\":false,\"screenshotDir\":\"screenshots\"}'
+        platforms: [darwin, linux]
+      - echo ""
+      - echo "🎉 Quickstart complete! You've seen both microservices and web automation in action."
+      - echo "📊 Check runix-report.json for detailed results"
+      - echo "📁 Check {{.LOG_DIR}} for execution logs"
+      - echo "📸 Screenshots saved in screenshots/ directory"
 
   quickstart:debug:
-    desc: Setup and debug example
+    desc: Setup and debug example with verbose logging
     cmds:
+      - echo "Starting Runix debug quickstart"
       - task: setup
       - task: build-all
       - task: verify-drivers
-      - task: import-steps
-      - echo "Running in debug mode"
-      - cmd: $env:RUNIX_LOG_LEVEL="DEBUG"; $env:RUNIX_LOG_CONSOLE="true"; cmd /c bin\\runix.bat run scenarios\\example-driver.feature --driver=exampledriver
+      - echo "Running in debug mode with full logging"
+      - cmd: 'cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_LOG_LEVEL=DEBUG&& set RUNIX_LOG_CONSOLE=true&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run {{.SCENARIO_DIR}}\example-driver.feature --driver=example-driver --driverConfig={\"timeout\":30000}"'
         platforms: [windows]
-      - cmd: RUNIX_LOG_LEVEL=DEBUG RUNIX_LOG_CONSOLE=true ./bin/run-runix run scenarios/example-driver.feature --driver=exampledriver
+      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_LOG_LEVEL=DEBUG RUNIX_LOG_CONSOLE=true RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run {{.SCENARIO_DIR}}/example-driver.feature --driver=example-driver --driverConfig='{\"timeout\":30000}'
         platforms: [darwin, linux]
 
-  debug:
-    desc: Run with TypeScript debugger
+  quickstart-simple:
+    desc: "Quick demonstration of Runix with example driver"
+    deps: [build-all]
     cmds:
-      - npm run debug -- {{.CLI_ARGS}}
-
-  log-clean:
-    desc: Clean log files
-    cmds:
-      - powershell -Command "if (Test-Path logs) { Remove-Item -Recurse -Force logs/* }"
-
-  verify-files:
-    desc: Verify that important files exist
-    cmds:
-      - cmd: powershell -Command "if (Test-Path .\\bin\\runix.bat) { Write-Host 'runix.bat exists' } else { Write-Host 'runix.bat MISSING' }"
+      - echo "🚀 Starting Runix Quick Demo..."
+      - echo "📋 This will run a simple test with the example driver"
+      - cmd: |
+          set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_DIR={{.ROOT_DIR}}\bin\drivers&& .\bin\runix.bat run {{.SCENARIO_DIR}}\example-driver.feature --driver=example-driver
         platforms: [windows]
-      - cmd: powershell -Command "Get-ChildItem -Path bin -Recurse | Select-Object FullName"
+      - cmd: |
+          RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR={{.ROOT_DIR}}/bin/drivers ./bin/runix run {{.SCENARIO_DIR}}/example-driver.feature --driver=example-driver
+        platforms: [linux, darwin]
+      - echo "✅ Quick demo complete!"
+
+  quickstart-web:
+    desc: "Quick demonstration of Runix with web driver"
+    deps: [build-all]
+    cmds:
+      - echo "🌐 Starting Runix Web Driver Quick Demo..."
+      - echo "📋 This will run web automation tests"
+      - echo "🖼️  Screenshots will be saved to {{.SCREENSHOT_DIR}}/ directory"
+      - cmd: |
+          set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_DIR={{.ROOT_DIR}}\bin\drivers&& .\bin\runix.bat run {{.SCENARIO_DIR}}\web-comprehensive-demo.feature --driver=web-driver --driverConfig="{\"headless\":false,\"timeout\":15000,\"screenshotDir\":\"{{.SCREENSHOT_DIR}}\"}"
         platforms: [windows]
-      - cmd: "ls -la ./bin"
+      - cmd: |
+          RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR={{.ROOT_DIR}}/bin/drivers ./bin/runix run {{.SCENARIO_DIR}}/web-comprehensive-demo.feature --driver=web-driver --driverConfig='{"headless":false,"timeout":15000,"screenshotDir":"{{.SCREENSHOT_DIR}}"}'
+        platforms: [linux, darwin]
+      - echo "✅ Web driver demo complete!"
+      - echo "📊 Check reports/runix-report.html for detailed results"
+      - echo "🖼️  Check {{.SCREENSHOT_DIR}}/ directory for visual proof"
+
+  quickstart:web-showcase:
+    desc: "Comprehensive web driver showcase - build and run multiple web scenarios"
+    deps: [setup, build-all, verify-drivers]
+    cmds:
+      - echo "🚀 Starting Runix Web Driver Showcase..."
+      - echo "✅ All drivers built successfully"
+      - echo ""
+      - echo "🌐 Running comprehensive web automation demo..."
+      - echo "📋 This will demonstrate:"
+      - echo "   - Browser automation (both headless and visible modes)"
+      - echo "   - Form interactions and input handling"
+      - echo "   - Element verification and assertions"
+      - echo "   - Screenshot capture"
+      - echo "   - Advanced web interactions"
+      - echo ""
+      - echo "⏱️  Starting in 3 seconds..."
+      - cmd: timeout /t 3 >nul
+        platforms: [windows]
+      - cmd: sleep 3
+        platforms: [linux, darwin]
+      - echo ""
+      - echo "🎬 Running basic web test scenario..."
+      - cmd: cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run {{.SCENARIO_DIR}}\web-test.feature --driver=web-driver"
+        platforms: [windows]
+      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run {{.SCENARIO_DIR}}/web-test.feature --driver=web-driver
         platforms: [darwin, linux]
+      - echo ""
+      - echo "🎭 Running comprehensive web demo..."
+      - cmd: cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run {{.SCENARIO_DIR}}\web-comprehensive-demo.feature --driver=web-driver"
+        platforms: [windows]
+      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run {{.SCENARIO_DIR}}/web-comprehensive-demo.feature --driver=web-driver
+        platforms: [darwin, linux]
+      - echo ""
+      - echo "🎪 Running advanced web showcase..."
+      - cmd: cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run {{.SCENARIO_DIR}}\web-showcase.feature --driver=web-driver"
+        platforms: [windows]
+      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run {{.SCENARIO_DIR}}/web-showcase.feature --driver=web-driver
+        platforms: [darwin, linux]
+      - echo ""
+      - echo "📊 Web showcase completed!"
+      - echo "📁 Check runix-report.json for detailed results"
+      - echo "📁 Check {{.LOG_DIR}} for execution logs"
+      - echo "📸 Screenshots saved in {{.SCREENSHOT_DIR}} directory"
+      - echo ""
+      - echo "🎉 Welcome to Runix web automation! You're ready to automate any website!"
+
+  fix-firewall:
+    desc: "Fix Windows Firewall rules for Node.js drivers"
+    cmds:
+      - cmd: |
+          echo "🔥 Checking and fixing Windows Firewall rules for Node.js..."
+          netsh advfirewall firewall delete rule name="Node.js: Server-side JavaScript" >nul 2>&1
+          netsh advfirewall firewall delete rule name="Node.js" >nul 2>&1
+          netsh advfirewall firewall add rule name="Node.js: Server-side JavaScript" dir=in action=allow program="%ProgramFiles%\nodejs\node.exe" enable=yes
+          netsh advfirewall firewall add rule name="Node.js: Server-side JavaScript" dir=out action=allow program="%ProgramFiles%\nodejs\node.exe" enable=yes
+          echo "✅ Firewall rules updated!"
+        platforms: [windows]
+      - cmd: echo "ℹ️  Firewall configuration not needed on this platform"
+        platforms: [darwin, linux]
+
+  quickstart-with-firewall-fix:
+    desc: "Quickstart with automatic firewall fix"
+    cmds:
+      - echo "🔧 Ensuring Node.js firewall permissions..."
+      - task: fix-firewall
+      - echo "🚀 Starting quickstart..."
+      - task: quickstart

@@ -1,0 +1,26 @@
+{
+  "name": "runix-web-driver",
+  "version": "1.0.0",
+  "description": "Playwright-based web driver for Runix automation engine",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "build": "node build.js",
+    "test": "node index.js --port=9001"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0",
+    "ws": "^8.14.0"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  },
+  "pkg": {
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "."
+  },
+  "author": "Runix Team",
+  "license": "MIT"
+}

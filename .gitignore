@@ -143,3 +143,13 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Runix binaries (now in bin directory)
+/bin/runix-*.exe
+/bin/runix-linux-*
+/bin/runix-macos-*
+
+# Keep screenshots directory but ignore contents
+screenshots/
+!screenshots/.gitkeep
+/CHANGELOG.md

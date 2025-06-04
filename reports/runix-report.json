@@ -1,0 +1,143 @@
+{
+  "timestamp": "2025-06-03T13:17:07.601Z",
+  "results": [
+    {
+      "success": true,
+      "step": "open the browser at \"https://example.com\"",
+      "data": {
+        "url": "https://example.com",
+        "title": "Example Domain"
+      },
+      "duration": 1003,
+      "timestamp": "2025-06-03T13:17:13.084Z"
+    },
+    {
+      "success": true,
+      "step": "take a screenshot \"01-homepage.png\"",
+      "data": {
+        "filename": "01-homepage.png",
+        "path": "C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\01-homepage.png"
+      },
+      "duration": 112,
+      "timestamp": "2025-06-03T13:17:13.198Z"
+    },
+    {
+      "success": true,
+      "step": "element \"h1\" should be visible",
+      "data": {
+        "element": "h1",
+        "visible": true
+      },
+      "duration": 14,
+      "timestamp": "2025-06-03T13:17:13.215Z"
+    },
+    {
+      "success": true,
+      "step": "element \"h1\" should contain text \"Example Domain\"",
+      "data": {
+        "element": "h1",
+        "expected": "Example Domain",
+        "actual": "Example Domain",
+        "matches": true
+      },
+      "duration": 3,
+      "timestamp": "2025-06-03T13:17:13.219Z"
+    },
+    {
+      "success": true,
+      "step": "open the browser at \"https://httpbin.org/forms/post\"",
+      "data": {
+        "url": "https://httpbin.org/forms/post",
+        "title": ""
+      },
+      "duration": 21862,
+      "timestamp": "2025-06-03T13:17:35.085Z"
+    },
+    {
+      "success": true,
+      "step": "take a screenshot \"02-form-page.png\"",
+      "data": {
+        "filename": "02-form-page.png",
+        "path": "C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\02-form-page.png"
+      },
+      "duration": 201,
+      "timestamp": "2025-06-03T13:17:35.288Z"
+    },
+    {
+      "success": true,
+      "step": "take a screenshot \"03-form-filled.png\"",
+      "data": {
+        "filename": "03-form-filled.png",
+        "path": "C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\03-form-filled.png"
+      },
+      "duration": 49,
+      "timestamp": "2025-06-03T13:17:35.341Z"
+    },
+    {
+      "success": true,
+      "step": "element \"input[name='email']\" should be visible",
+      "data": {
+        "element": "input[name='email']",
+        "visible": false
+      },
+      "duration": 4,
+      "timestamp": "2025-06-03T13:17:35.347Z"
+    },
+    {
+      "success": true,
+      "step": "element \"input[name='name']\" should be visible",
+      "data": {
+        "element": "input[name='name']",
+        "visible": false
+      },
+      "duration": 4,
+      "timestamp": "2025-06-03T13:17:35.354Z"
+    },
+    {
+      "success": true,
+      "step": "open the browser at \"https://httpbin.org/delay/1\"",
+      "data": {
+        "url": "https://httpbin.org/delay/1",
+        "title": ""
+      },
+      "duration": 7250,
+      "timestamp": "2025-06-03T13:17:42.607Z"
+    },
+    {
+      "success": true,
+      "step": "wait for element \"body\"",
+      "data": {
+        "element": "body",
+        "found": true
+      },
+      "duration": 13,
+      "timestamp": "2025-06-03T13:17:42.621Z"
+    },
+    {
+      "success": true,
+      "step": "take a screenshot \"04-delayed-content.png\"",
+      "data": {
+        "filename": "04-delayed-content.png",
+        "path": "C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\04-delayed-content.png"
+      },
+      "duration": 54,
+      "timestamp": "2025-06-03T13:17:42.678Z"
+    },
+    {
+      "success": true,
+      "step": "element \"body\" should be visible",
+      "data": {
+        "element": "body",
+        "visible": true
+      },
+      "duration": 8,
+      "timestamp": "2025-06-03T13:17:42.687Z"
+    }
+  ],
+  "summary": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0,
+    "duration": 35087
+  }
+}

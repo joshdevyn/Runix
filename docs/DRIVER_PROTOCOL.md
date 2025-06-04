@@ -29,6 +29,8 @@ The protocol supports multiple transport mechanisms:
 - **TCP**: Raw TCP socket communication with JSON messages
 - **Standard I/O**: Communication via stdin/stdout (for simpler drivers)
 
+Drivers should listen on the port specified by the `RUNIX_DRIVER_PORT` environment variable, which is automatically assigned by the Runix engine using ephemeral ports to avoid conflicts.
+
 ## Message Format
 
 For WebSocket and TCP transports, messages are JSON objects with the following format:
@@ -349,9 +351,11 @@ Each driver must provide a `driver.json` manifest file with the following struct
 
 Drivers receive these environment variables when started:
 
-- `RUNIX_DRIVER_PORT`: The port number that the driver should listen on
+- `RUNIX_DRIVER_PORT`: The ephemeral port number assigned by the engine that the driver should listen on
 - `RUNIX_DRIVER_INSTANCE_ID`: A unique ID for this driver instance
 - `RUNIX_DRIVER_LOG_LEVEL`: The requested log verbosity (info, debug, trace)
+
+Note: The port is dynamically assigned by the OS to ensure no conflicts between multiple driver instances.
 
 ## Security Considerations
 

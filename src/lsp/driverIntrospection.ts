@@ -3,16 +3,18 @@ import * as http from 'http';
 import * as https from 'https';
 import { v4 as uuidv4 } from 'uuid';
 import { DriverMetadata, DriverRegistry, StepDefinition } from '../drivers/driverRegistry';
-import { DriverProcessManager } from '../drivers/management/DriverProcessManager';
+import { DriverProcessManager, ProcessInfo } from '../drivers/driverProcessManager';
+import { Logger } from '../utils/logger';
 
 /**
  * Service for introspecting drivers to get completion data for the LSP
  */
 export class DriverIntrospectionService {
-  private static instance: DriverIntrospectionService;
+  public static instance: DriverIntrospectionService;
   private driverRegistry: DriverRegistry;
   private processManager: DriverProcessManager;
   private stepCache: Map<string, StepDefinition[]> = new Map();
+  private logger = Logger.getInstance();
   
   private constructor() {
     this.driverRegistry = DriverRegistry.getInstance();
@@ -31,18 +33,24 @@ export class DriverIntrospectionService {
    */
   public async getAllStepDefinitions(): Promise<StepDefinition[]> {
     const allSteps: StepDefinition[] = [];
-    const drivers = this.driverRegistry.getAllDrivers();
+    const driverIds = this.driverRegistry.listDriverIds();
     
     // First, include any statically defined steps from driver metadata
-    for (const driver of drivers) {
-      allSteps.push(...(driver.supportedSteps || []));
+    for (const driverId of driverIds) {
+      const driver = this.driverRegistry.getDriver(driverId);
+      if (driver) {
+        allSteps.push(...(driver.config?.supportedSteps || []));
+      }
     }
     
     // Then, try to get dynamic steps from running drivers
-    for (const driver of drivers) {
+    for (const driverId of driverIds) {
+      const driver = this.driverRegistry.getDriver(driverId);
+      if (!driver) continue;
+      
       try {
         // Only introspect drivers that aren't already running if they support introspection
-        if (driver.supportedFeatures?.includes('introspection') && 
+        if (driver.config?.supportedFeatures?.includes('introspection') && 
             !this.processManager.isDriverRunning(driver.id)) {
           const steps = await this.getStepsFromDriver(driver);
           if (steps.length > 0) {
@@ -50,7 +58,7 @@ export class DriverIntrospectionService {
           }
         }
       } catch (err) {
-        console.error(`Error introspecting driver ${driver.name}:`, err);
+        this.logger.error(`Error introspecting driver ${driver.name}:`, { error: err instanceof Error ? err.message : String(err) });
       }
     }
     
@@ -62,10 +70,13 @@ export class DriverIntrospectionService {
    */
   public getDriversWithSteps(): { id: string, name: string, steps: StepDefinition[] }[] {
     const result: { id: string, name: string, steps: StepDefinition[] }[] = [];
-    const drivers = this.driverRegistry.getAllDrivers();
+    const driverIds = this.driverRegistry.listDriverIds();
     
-    for (const driver of drivers) {
-      let steps: StepDefinition[] = driver.supportedSteps || [];
+    for (const driverId of driverIds) {
+      const driver = this.driverRegistry.getDriver(driverId);
+      if (!driver) continue;
+      
+      let steps: StepDefinition[] = driver.config?.supportedSteps || [];
       
       // Add steps from cache if available
       if (this.stepCache.has(driver.id)) {
@@ -85,6 +96,22 @@ export class DriverIntrospectionService {
   }
 
   /**
+   * Query a running driver for its step definitions
+   */
+  private async queryRunningDriver(port: number, protocol?: string): Promise<StepDefinition[]> {
+    const driverProtocol = protocol || 'websocket'; // Default to websocket
+    
+    switch (driverProtocol) {
+      case 'websocket':
+        return this.queryWebSocketDriver(port);
+      case 'http':
+        return this.queryHttpDriver(port);
+      default:
+        throw new Error(`Unsupported protocol for introspection: ${driverProtocol}`);
+    }
+  }
+
+  /**
    * Get step definitions from a specific driver
    */
   public async getStepsFromDriver(driver: DriverMetadata): Promise<StepDefinition[]> {
@@ -97,7 +124,14 @@ export class DriverIntrospectionService {
     if (this.processManager.isDriverRunning(driver.id)) {
       const processInfo = this.processManager.getDriverProcess(driver.id);
       if (processInfo) {
-        return this.queryRunningDriver(processInfo.port, driver.protocol);
+        try {
+          const steps = await this.queryRunningDriver(processInfo.port, driver.config?.protocol);
+          this.stepCache.set(driver.id, steps);
+          return steps;
+        } catch (err) {
+          this.logger.error(`Error querying running driver ${driver.name}:`, { error: err instanceof Error ? err.message : String(err) });
+          return driver.config?.supportedSteps || [];
+        }
       }
     }
     
@@ -107,7 +141,7 @@ export class DriverIntrospectionService {
       const processInfo = await this.processManager.startDriver(driver);
       
       // Query the driver for step definitions
-      const steps = await this.queryRunningDriver(processInfo.port, driver.protocol);
+      const steps = await this.queryRunningDriver(processInfo.port, driver.config?.protocol);
       
       // Cache the results
       this.stepCache.set(driver.id, steps);
@@ -117,22 +151,8 @@ export class DriverIntrospectionService {
       
       return steps;
     } catch (err) {
-      console.error(`Error getting steps from driver ${driver.name}:`, err);
-      return driver.supportedSteps || [];
-    }
-  }
-
-  /**
-   * Query a running driver for its step definitions
-   */
-  private async queryRunningDriver(port: number, protocol: string): Promise<StepDefinition[]> {
-    switch (protocol) {
-      case 'websocket':
-        return this.queryWebSocketDriver(port);
-      case 'http':
-        return this.queryHttpDriver(port);
-      default:
-        throw new Error(`Unsupported protocol for introspection: ${protocol}`);
+      this.logger.error(`Error getting steps from driver ${driver.name}:`, { error: err instanceof Error ? err.message : String(err) });
+      return driver.config?.supportedSteps || [];
     }
   }
 
@@ -225,5 +245,63 @@ export class DriverIntrospectionService {
         });
       }).on('error', reject);
     });
+  }
+
+  /**
+   * Clear the cache
+   */
+  public clearCache(): void {
+    this.stepCache.clear();
+  }
+
+  /**
+   * Get step definitions from all drivers without starting them
+   */
+  public async getAllStepDefinitionsStatic(): Promise<StepDefinition[]> {
+    const driverIds = this.driverRegistry.listDriverIds();
+    const allSteps: StepDefinition[] = [];
+
+    for (const driverId of driverIds) {
+      const steps = await this.getDriverStepDefinitionsStatic(driverId);
+      allSteps.push(...steps);
+    }
+
+    return allSteps;
+  }
+
+  /**
+   * Get step definitions for a specific driver without starting it
+   */
+  public async getDriverStepDefinitionsStatic(driverId: string): Promise<StepDefinition[]> {
+    if (this.stepCache.has(driverId)) {
+      return this.stepCache.get(driverId)!;
+    }
+
+    const driver = this.driverRegistry.getDriver(driverId);
+    
+    if (!driver) {
+      this.logger.warn(`Driver not found: ${driverId}`);
+      return [];
+    }
+
+    // For LSP, we'll provide mock step definitions based on driver metadata
+    // In a real implementation, this could read from driver.json or other sources
+    const mockSteps: StepDefinition[] = [
+      {
+        id: `${driverId}-mock-action-1`,
+        pattern: `I perform action on "${driver.name}"`,
+        action: 'perform',
+        description: `Perform action using ${driver.name}`
+      },
+      {
+        id: `${driverId}-mock-action-2`,
+        pattern: `I execute command "(.*)" with "${driver.name}"`,
+        action: 'execute',
+        description: `Execute command using ${driver.name}`
+      }
+    ];
+
+    this.stepCache.set(driverId, mockSteps);
+    return mockSteps;
   }
 }

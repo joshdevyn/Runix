@@ -38,11 +38,11 @@ export class ConfigValidator {
   }
   
   /**
-   * Validate driver setup
+   * Validate driver setup with path sanitization
    */
   static validateDrivers(): string[] {
     const issues: string[] = [];
-    const driversDir = path.join(process.cwd(), 'drivers');
+    const driversDir = path.resolve(process.cwd(), 'drivers'); // Resolve to absolute path
     
     if (!fs.existsSync(driversDir)) {
       issues.push(`Drivers directory not found: ${driversDir}`);
@@ -52,16 +52,27 @@ export class ConfigValidator {
     try {
       const driverDirs = fs.readdirSync(driversDir, { withFileTypes: true })
         .filter(dirent => dirent.isDirectory())
-        .map(dirent => dirent.name);
+        .map(dirent => dirent.name)
+        .filter(name => /^[a-zA-Z0-9_-]+$/.test(name)); // Sanitize directory names
         
       if (driverDirs.length === 0) {
-        issues.push('No drivers found in drivers directory');
+        issues.push('No valid drivers found in drivers directory');
       }
       
       for (const driverName of driverDirs) {
         const driverJsonPath = path.join(driversDir, driverName, 'driver.json');
         if (!fs.existsSync(driverJsonPath)) {
           issues.push(`Driver ${driverName} is missing driver.json`);
+        } else {
+          // Validate driver.json structure
+          try {
+            const driverConfig = JSON.parse(fs.readFileSync(driverJsonPath, 'utf8'));
+            if (!driverConfig.name || !driverConfig.executable) {
+              issues.push(`Driver ${driverName} has invalid driver.json structure`);
+            }
+          } catch (parseError) {
+            issues.push(`Driver ${driverName} has malformed driver.json`);
+          }
         }
       }
     } catch (error: unknown) {

@@ -165,9 +165,22 @@ test('websocket server handles connections', (done) => {
   const ws = new WebSocket('ws://localhost:9999');
   
   ws.on('open', () => {
-    // Connection successful
-    ws.close();
-    done();
+    // Test capabilities method
+    ws.send(JSON.stringify({
+      id: '1',
+      type: 'request',
+      method: 'capabilities',
+      params: {}
+    }));
+  });
+  
+  ws.on('message', (data) => {
+    const response = JSON.parse(data.toString());
+    if (response.id === '1' && response.result) {
+      // Connection and capabilities test successful
+      ws.close();
+      done();
+    }
   });
   
   ws.on('error', (err) => {

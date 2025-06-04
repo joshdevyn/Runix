@@ -30,12 +30,12 @@ Create a `driver.json` file that tells Runix how to start your driver:
 ```json
 {
   "name": "MyDriver",
-  "command": "node",
-  "args": ["my-driver.js"],
-  "transport": "websocket",
-  "endpoint": "ws://localhost:8080"
+  "executable": "my-driver.js",
+  "transport": "websocket"
 }
 ```
+
+Note: Ports are automatically assigned by the Runix engine. Your driver should read the port from the `RUNIX_DRIVER_PORT` environment variable.
 
 ### Step 3: Implement the Driver
 
@@ -43,29 +43,71 @@ Create a script that implements the Runix Driver Protocol. Here's an example in 
 
 ```javascript
 // my-driver.js
-
 const WebSocket = require('ws');
-const ws = new WebSocket('ws://localhost:8080');
 
-ws.on('open', function open() {
-  console.log('Connected to Runix engine');
+// Get port from environment variable assigned by Runix engine
+const port = parseInt(process.env.RUNIX_DRIVER_PORT || '9000', 10);
+
+// Create structured logger for driver processes
+function createDriverLogger() {
+  const getCallerInfo = () => {
+    const stack = new Error().stack;
+    if (!stack) return 'unknown';
+    
+    const lines = stack.split('\n');
+    for (let i = 2; i < lines.length; i++) {
+      const line = lines[i];
+      const match = line.match(/at\s+(\w+)\s*\(/);
+      if (match) return match[1];
+    }
+    return 'unknown';
+  };
+
+  return {
+    log: (message, data = {}) => {
+      const caller = getCallerInfo();
+      const timestamp = new Date().toISOString();
+      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      console.log(`${timestamp} [INFO] [my-driver.js::MyDriver::${caller}] ${message}${dataStr}`);
+    },
+    error: (message, data = {}) => {
+      const caller = getCallerInfo();
+      const timestamp = new Date().toISOString();
+      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      console.error(`${timestamp} [ERROR] [my-driver.js::MyDriver::${caller}] ${message}${dataStr}`);
+    }
+  };
+}
+
+const logger = createDriverLogger();
+
+// Start WebSocket server on assigned port
+const server = require('http').createServer();
+const wss = new WebSocket.Server({ server });
+
+wss.on('connection', function connection(ws) {
+  logger.log('Client connected');
+  
+  ws.on('message', function incoming(data) {
+    const request = JSON.parse(data);
+    handleRequest(request, ws);
+  });
 });
 
-ws.on('message', function incoming(data) {
-  const request = JSON.parse(data);
-  handleRequest(request);
+server.listen(port, '127.0.0.1', () => {
+  logger.log(`Driver listening on port ${port}`);
 });
 
 // Handle JSON-RPC request
-async function handleRequest(request) {
+async function handleRequest(request, ws) {
   if (!request.id || !request.method) {
-    return sendErrorResponse(request.id, 400, 'Invalid request format');
+    return sendErrorResponse(ws, request.id, 400, 'Invalid request format');
   }
 
   try {
     switch (request.method) {
       case 'capabilities':
-        return sendSuccessResponse(request.id, {
+        return sendSuccessResponse(ws, request.id, {
           name: "MyDriver",
           version: "1.0.0",
           description: "My custom automation driver",
@@ -74,46 +116,40 @@ async function handleRequest(request) {
         });
       
       case 'initialize':
-        return sendSuccessResponse(request.id, { initialized: true });
+        return sendSuccessResponse(ws, request.id, { initialized: true });
       
       case 'execute':
-        return handleExecute(request.id, request.params?.action, request.params?.args);
+        return handleExecute(ws, request.id, request.params?.action, request.params?.args);
       
       case 'shutdown':
-        return sendSuccessResponse(request.id, { shutdown: true });
+        return sendSuccessResponse(ws, request.id, { shutdown: true });
       
       default:
-        return sendErrorResponse(request.id, 404, `Method not found: ${request.method}`);
+        return sendErrorResponse(ws, request.id, 404, `Method not found: ${request.method}`);
     }
   } catch (err) {
-    return sendErrorResponse(request.id, 500, err.message);
+    return sendErrorResponse(ws, request.id, 500, err.message);
   }
 }
 
 // Handle execute requests
-async function handleExecute(id, action, args) {
+async function handleExecute(ws, id, action, args) {
   switch (action) {
     case 'myAction':
-      // Implement action logic here
-      return sendSuccessResponse(id, { 
+      logger.log('Executing myAction', { args });
+      return sendSuccessResponse(ws, id, { 
         success: true,
         data: { result: `Executed myAction with ${args.join(', ')}` }
       });
     
-    case 'myOtherAction':
-      // Implement action logic here
-      return sendSuccessResponse(id, { 
-        success: true,
-        data: { result: `Executed myOtherAction with ${args.join(', ')}` }
-      });
-    
     default:
-      return sendErrorResponse(id, 400, `Unknown action: ${action}`);
+      logger.error('Unknown action requested', { action });
+      return sendErrorResponse(ws, id, 400, `Unknown action: ${action}`);
   }
 }
 
 // Send success response
-function sendSuccessResponse(id, result) {
+function sendSuccessResponse(ws, id, result) {
   const response = {
     id,
     type: 'response',
@@ -124,7 +160,7 @@ function sendSuccessResponse(id, result) {
 }
 
 // Send error response
-function sendErrorResponse(id, code, message, details) {
+function sendErrorResponse(ws, id, code, message, details) {
   const response = {
     id,
     type: 'response',
@@ -139,6 +175,22 @@ function sendErrorResponse(id, code, message, details) {
 }
 ```
 
+## Logging Best Practices
+
+All drivers should use structured logging that shows:
+- **Timestamp**: ISO format timestamp
+- **Level**: INFO, ERROR, WARN, DEBUG, etc.
+- **File**: The source file name
+- **Class/Module**: The driver or component name
+- **Method**: The current method or function
+- **Message**: Descriptive message
+- **Data**: Additional context as JSON
+
+Example log format:
+```
+2024-01-15T10:30:45.123Z [INFO] [my-driver.js::MyDriver::handleRequest] Processing execute request {"action": "myAction", "args": ["param1"]}
+```
+
 ## Creating Drivers in Other Languages
 
 You can implement drivers in any language that can communicate over WebSockets (or other transport mechanisms like HTTP). Here are examples in different languages:
@@ -149,6 +201,20 @@ You can implement drivers in any language that can communicate over WebSockets (
 import json
 import asyncio
 import websockets
+import datetime
+
+def create_logger():
+    def log(level, message, data=None):
+        timestamp = datetime.datetime.utcnow().isoformat() + 'Z'
+        data_str = f" {json.dumps(data)}" if data else ""
+        print(f"{timestamp} [{level}] [my-driver.py::MyPythonDriver::unknown] {message}{data_str}")
+    
+    return {
+        'info': lambda msg, data=None: log('INFO', msg, data),
+        'error': lambda msg, data=None: log('ERROR', msg, data)
+    }
+
+logger = create_logger()
 
 async def handle_request(websocket, path):
     async for message in websocket:
@@ -156,6 +222,8 @@ async def handle_request(websocket, path):
         id = request.get('id')
         method = request.get('method')
         params = request.get('params', {})
+        
+        logger['info']('Processing request', {'method': method, 'id': id})
         
         if not id or not method:
             await send_error(websocket, id, 400, "Invalid request format")
@@ -251,7 +319,7 @@ The driver should expose HTTP endpoints that match the Runix Driver Protocol met
 ## Best Practices
 
 1. **Error Handling**: Always handle errors gracefully and return appropriate error responses
-2. **Logging**: Use stderr for logging so it doesn't interfere with the protocol communication
+2. **Structured Logging**: Use the standardized logging format for consistency
 3. **Documentation**: Document your driver's supported actions and parameters
 4. **Configuration**: Make your driver configurable to support different environments
 5. **Testing**: Test your driver independently before integrating with Runix

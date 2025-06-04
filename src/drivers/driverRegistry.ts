@@ -1,967 +1,526 @@
-import * as path from 'path';
 import * as fs from 'fs';
-import { spawn, ChildProcess } from 'child_process';
-import { env } from '../utils/env';
+import * as path from 'path';
 import { Logger } from '../utils/logger';
-import { v4 as uuidv4 } from 'uuid';
-import { WebSocket } from 'ws';
-import http from 'http';
+import { findExecutable } from '../utils/executableFinder';
+import { DriverProcessManager } from './driverProcessManager';
+import { DriverError, DriverStartupError, ConfigurationError } from '../utils/errors';
 
 export interface DriverMetadata {
   id: string;
   name: string;
-  description: string;
   version: string;
-  author: string;
-  license: string;
-  executable: string;
-  protocol: 'websocket' | 'http' | 'tcp';
-  features: string[];
-  supportedActions: string[];
-  directory: string;
-  config?: Record<string, any>;
-  command?: string;
-  args?: string[];
-  transport?: string;
-  endpoint?: string;
-  supportedSteps?: StepDefinition[];
-  supportedFeatures?: string[];
-}
-
-export interface DriverProcessInfo {
-  id: string;
-  process: ChildProcess;
-  port: number;
-  metadata: DriverMetadata;
-  status: 'starting' | 'running' | 'stopping' | 'error';
+  path: string;
+  executable?: string;
+  config?: any;
 }
 
 export interface StepDefinition {
   id: string;
   pattern: string;
-  description: string;
   action: string;
-  examples: string[];
-  parameters: {
-    name: string;
-    type: string;
-    description: string;
-    required: boolean;
-    default?: any;
-  }[];
+  description?: string;
 }
 
 /**
- * Registry for managing driver metadata and processes
+ * Singleton registry for managing automation drivers
  */
 export class DriverRegistry {
   private static instance: DriverRegistry;
   private drivers: Map<string, DriverMetadata> = new Map();
-  private processes: Map<string, DriverProcessInfo> = new Map();
+  private processes: Map<string, any> = new Map();
   private log: Logger;
-  private portCounter: number = 8000; // Starting port for driver processes
-  
+  private initialized = false;
+  private discovering = false;
+
   private constructor() {
-    this.log = Logger.getInstance().createChildLogger({ 
+    this.log = Logger.getInstance().createChildLogger({
       component: 'DriverRegistry'
     });
   }
-  
+
   public static getInstance(): DriverRegistry {
     if (!DriverRegistry.instance) {
       DriverRegistry.instance = new DriverRegistry();
     }
     return DriverRegistry.instance;
   }
-  
-  /**
-   * Discover all drivers in the driver directories
-   */
-  public async discoverDrivers(): Promise<void> {
-    this.log.debug('Discovering drivers...');
-    try {
-      const cwd = process.cwd();
-      // only load built drivers for standalone quickstart
-      const driverDirs = [
-        path.join(cwd, 'bin', 'drivers')
-      ];
 
-      // Add custom driver directories from environment
-      const customDriverDir = env.get('DRIVER_DIR');
-      if (customDriverDir) {
-        driverDirs.push(customDriverDir);
+  /**
+   * Initialize the registry with driver discovery
+   */
+  public async initialize(): Promise<void> {
+    const traceId = this.log.logMethodEntry('initialize', { component: 'DriverRegistry' });
+    
+    try {
+      if (this.initialized) {
+        this.log.debug('Driver registry already initialized', { traceId });
+        this.log.logMethodExit('initialize', traceId, { alreadyInitialized: true });
+        return;
       }
       
-      // Add driver directories relative to executable
-      if (process.execPath && !process.execPath.includes('node')) {
-        const execDir = path.dirname(process.execPath);
-        driverDirs.push(path.join(execDir, 'drivers'));
-      }
-      
-      // Scan all driver directories
-      for (const dirPath of driverDirs) {
-        if (!fs.existsSync(dirPath)) {
-          this.log.debug(`Driver directory not found: ${dirPath}`);
-          continue;
+      if (this.discovering) {
+        this.log.debug('Driver discovery already in progress, waiting...', { traceId });
+        // Wait for current discovery to complete
+        let waitCount = 0;
+        while (this.discovering) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          waitCount++;
+          if (waitCount % 10 === 0) { // Log every second
+            this.log.trace('Still waiting for driver discovery to complete', { 
+              traceId, 
+              waitTimeSeconds: waitCount / 10 
+            });
+          }
+          if (waitCount > 100) { // 10 second timeout
+            throw new ConfigurationError('Driver discovery timeout', { 
+              operation: 'driver_discovery_wait',
+              traceId
+            });
+          }
         }
-        
-        this.log.debug(`Scanning driver directory: ${dirPath}`);
-        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-        
-        for (const entry of entries) {
-          if (!entry.isDirectory()) continue;
-          
-          const driverDir = path.join(dirPath, entry.name);
-          await this.loadDriverFromDirectory(driverDir);
-        }
+        this.log.debug('Driver discovery wait completed', { traceId, waitTimeSeconds: waitCount / 10 });
+        this.log.logMethodExit('initialize', traceId, { waitedForDiscovery: true });
+        return;
       }
-      
-      this.log.info(`Discovered ${this.drivers.size} drivers`);
+
+      this.discovering = true;
+      try {
+        await this.discoverDrivers();
+        this.initialized = true;
+        this.log.info(`Driver registry initialized successfully`, { 
+          traceId,
+          component: 'DriverRegistry',
+          driversDiscovered: this.drivers.size
+        }, {
+          discoveredDrivers: Array.from(this.drivers.keys())
+        });
+        
+        this.log.logMethodExit('initialize', traceId, { 
+          driversDiscovered: this.drivers.size,
+          initialized: true
+        });
+      } finally {
+        this.discovering = false;
+      }
     } catch (error) {
-      this.log.error(`Error discovering drivers: ${error}`);
+      this.discovering = false;
+      this.log.logMethodError('initialize', traceId, error instanceof Error ? error : new Error(String(error)), {
+        component: 'DriverRegistry'
+      });
       throw error;
     }
   }
-  
+
   /**
-   * Load a driver from a directory
+   * Discover all available drivers with caching
    */
-  private async loadDriverFromDirectory(driverDir: string): Promise<void> {
+  private async discoverDrivers(): Promise<void> {
+    const traceId = this.log.startTrace('driver-discovery');
+    
     try {
-      this.log.debug(`Loading driver from directory: ${driverDir}`);
-      
-      // Check for driver.json metadata
-      const metadataPath = path.join(driverDir, 'driver.json');
-      if (!fs.existsSync(metadataPath)) {
-        this.log.debug(`No driver.json found in ${driverDir}`);
+      if (this.drivers.size > 0) {
+        this.log.debug('Drivers already discovered, skipping discovery', { 
+          traceId,
+          existingDriverCount: this.drivers.size 
+        });
         return;
       }
+
+      this.log.debug('Starting driver discovery process', { traceId });
       
-      // Parse driver metadata
-      const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
-      
-      // Validate required fields
-      if (!metadata.name || !metadata.version || !metadata.executable) {
-        this.log.warn(`Invalid driver metadata in ${metadataPath}`);
-        return;
+      const searchPaths = [
+        path.join(process.cwd(), 'drivers'),
+        path.join(path.dirname(process.execPath), 'drivers'),
+        path.join(__dirname, '..', '..', 'drivers'),
+        path.join(__dirname, '..', '..', 'bin', 'drivers')
+      ];
+
+      // Add custom driver directory from environment
+      const customDriverDir = process.env.RUNIX_DRIVER_DIR;
+      if (customDriverDir) {
+        searchPaths.push(customDriverDir);
+        this.log.debug('Added custom driver directory from environment', { 
+          traceId,
+          customDriverDir 
+        });
       }
+
+      this.log.debug('Driver discovery search paths configured', { 
+        traceId,
+        searchPaths,
+        totalPaths: searchPaths.length
+      });
+
+      let totalDriversFound = 0;
+      for (let i = 0; i < searchPaths.length; i++) {
+        const searchPath = searchPaths[i];
+        const pathTraceId = this.log.startTrace('search-path-scan', { searchPath, pathIndex: i });
+        
+        try {
+          this.log.trace(`Scanning search path ${i + 1}/${searchPaths.length}`, { 
+            traceId,
+            pathTraceId,
+            searchPath,
+            pathIndex: i
+          });
+          
+          const driversFoundInPath = await this.loadDriversFromDirectory(searchPath);
+          totalDriversFound += driversFoundInPath;
+          
+          this.log.trace(`Search path scan completed`, { 
+            traceId,
+            pathTraceId,
+            searchPath,
+            driversFoundInPath,
+            totalDriversFound
+          });
+        } finally {
+          this.log.endTrace(pathTraceId);
+        }
+      }
+
+      this.log.info('Driver discovery completed', { 
+        traceId,
+        totalDriversFound,
+        searchPathsScanned: searchPaths.length
+      }, {
+        discoveredDriverIds: Array.from(this.drivers.keys()),
+        searchPaths
+      });
+
+    } finally {
+      this.log.endTrace(traceId);
+    }
+  }
+
+  /**
+   * Load drivers from a directory
+   */
+  private async loadDriversFromDirectory(dir: string): Promise<number> {
+    const traceId = this.log.startTrace('load-drivers-from-directory', { directory: dir });
+    let driversLoaded = 0;
+    
+    try {
+      if (!fs.existsSync(dir)) {
+        this.log.debug(`Driver directory does not exist, skipping`, { traceId, directory: dir });
+        return 0;
+      }
+
+      this.log.trace(`Reading directory contents`, { traceId, directory: dir });
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      const subdirectories = entries.filter(entry => entry.isDirectory());
       
-      // Create driver ID (lowercase name without spaces)
-      const driverId = metadata.id || metadata.name.toLowerCase().replace(/\s+/g, '');
+      this.log.trace(`Found subdirectories`, { 
+        traceId,
+        directory: dir,
+        subdirectoryCount: subdirectories.length,
+        subdirectories: subdirectories.map(d => d.name)
+      });
       
-      // Construct full driver metadata
-      const driver: DriverMetadata = {
-        id: driverId,
-        name: metadata.name,
-        description: metadata.description || '',
-        version: metadata.version,
-        author: metadata.author || 'Unknown',
-        license: metadata.license || 'Unknown',
-        executable: metadata.executable,
-        protocol: metadata.protocol || 'websocket',
-        features: metadata.features || ['execute'],
-        supportedActions: metadata.actions || [],
-        directory: driverDir,
-        config: metadata.config
-      };
-      
-      // Register the driver
-      this.drivers.set(driverId, driver);
-      this.log.info(`Registered driver: ${driver.name} v${driver.version}`);
+      for (let i = 0; i < subdirectories.length; i++) {
+        const entry = subdirectories[i];
+        const driverPath = path.join(dir, entry.name);
+        const driverTraceId = this.log.startTrace('load-single-driver', { 
+          driverPath,
+          driverIndex: i,
+          driverName: entry.name
+        });
+        
+        try {
+          this.log.trace(`Loading driver ${i + 1}/${subdirectories.length}`, { 
+            traceId,
+            driverTraceId,
+            driverPath,
+            driverName: entry.name
+          });
+          
+          const metadata = await this.loadDriverMetadata(driverPath);
+          if (metadata) {
+            this.drivers.set(metadata.id, metadata);
+            driversLoaded++;
+            this.log.debug(`Driver loaded successfully`, { 
+              traceId,
+              driverTraceId,
+              driverId: metadata.id,
+              driverName: metadata.name,
+              driverPath
+            });
+          } else {
+            this.log.warn(`Failed to load driver metadata`, { 
+              traceId,
+              driverTraceId,
+              driverPath,
+              driverName: entry.name
+            });
+          }
+        } catch (error) {
+          this.log.error(`Error loading individual driver`, { 
+            traceId,
+            driverTraceId,
+            driverPath,
+            driverName: entry.name
+          }, error);
+        } finally {
+          this.log.endTrace(driverTraceId);
+        }
+      }
+
+      this.log.debug(`Directory scan completed`, { 
+        traceId,
+        directory: dir,
+        driversLoaded,
+        subdirectoriesScanned: subdirectories.length
+      });
+
+      return driversLoaded;
+
     } catch (error) {
-      this.log.error(`Error loading driver from ${driverDir}: ${error}`);
+      this.log.error(`Error loading drivers from directory`, { traceId, directory: dir }, error);
+      return 0;
+    } finally {
+      this.log.endTrace(traceId);
     }
   }
-  
+
   /**
-   * Get all registered drivers
+   * Load driver metadata from directory
    */
-  public getAllDrivers(): DriverMetadata[] {
-    return Array.from(this.drivers.values());
-  }
-  
-  /**
-   * Get a driver by ID
-   */
-  public getDriver(idOrName: string): DriverMetadata | undefined {
-    // Try direct ID match
-    if (this.drivers.has(idOrName)) {
-      return this.drivers.get(idOrName);
-    }
+  private async loadDriverMetadata(driverPath: string): Promise<DriverMetadata | null> {
+    const traceId = this.log.startTrace('load-driver-metadata', { driverPath });
     
-    // Try case-insensitive name match
-    const lowercaseId = idOrName.toLowerCase();
-    for (const driver of this.drivers.values()) {
-      if (driver.id.toLowerCase() === lowercaseId || 
-          driver.name.toLowerCase() === lowercaseId) {
-        return driver;
+    try {
+      const manifestPath = path.join(driverPath, 'driver.json');
+      
+      this.log.trace('Checking for driver manifest', { traceId, manifestPath });
+      
+      if (!fs.existsSync(manifestPath)) {
+        this.log.debug(`No driver.json found`, { traceId, driverPath, manifestPath });
+        return null;
       }
+
+      this.log.trace('Reading driver manifest', { traceId, manifestPath });
+      const manifestContent = fs.readFileSync(manifestPath, 'utf8');
+      
+      this.log.trace('Parsing driver manifest', { traceId, manifestPath, contentLength: manifestContent.length });
+      const manifest = JSON.parse(manifestContent);
+      
+      // Get executable from manifest or try to find one
+      let executable = manifest.executable;
+      if (!executable) {
+        this.log.trace('No executable specified in manifest, searching for default', { traceId, driverPath });
+        executable = findExecutable(driverPath);
+      } else {
+        this.log.trace('Using executable from manifest', { traceId, driverPath, manifestExecutable: executable });
+        // Verify the specified executable exists
+        const executablePath = path.join(driverPath, executable);
+        if (!fs.existsSync(executablePath)) {
+          this.log.warn('Specified executable not found, searching for alternatives', { 
+            traceId, 
+            driverPath, 
+            specifiedExecutable: executable 
+          });
+          executable = findExecutable(driverPath) || executable;
+        }
+      }
+      
+      const metadata: DriverMetadata = {
+        id: manifest.id || path.basename(driverPath),
+        name: manifest.name || 'Unknown Driver',
+        version: manifest.version || '1.0.0',
+        path: driverPath,
+        executable,
+        config: manifest.config || {}
+      };
+
+      this.log.debug('Driver metadata loaded successfully', { traceId, driverPath }, {
+        metadata: {
+          id: metadata.id,
+          name: metadata.name,
+          version: metadata.version,
+          executable: metadata.executable,
+          hasConfig: !!metadata.config && Object.keys(metadata.config).length > 0
+        }
+      });
+
+      return metadata;
+
+    } catch (error) {
+      this.log.error(`Error loading driver metadata`, { traceId, driverPath }, error);
+      return null;
+    } finally {
+      this.log.endTrace(traceId);
     }
-    
-    return undefined;
   }
-  
+
+  /**
+   * Start a driver instance
+   */
+  public async startDriver(driverId: string): Promise<any> {
+    if (this.processes.has(driverId)) {
+      return this.processes.get(driverId)!;
+    }
+
+    const metadata = this.drivers.get(driverId);
+    if (!metadata) {
+      throw new Error(`Driver not found: ${driverId}`);
+    }
+
+    this.log.debug(`Starting driver: ${driverId}`);
+    
+    const instance = await this.createDriverInstance(metadata);
+    this.processes.set(driverId, instance);
+    
+    return instance;
+  }
+
+  /**
+   * Create a driver instance using the process manager
+   */
+  private async createDriverInstance(metadata: DriverMetadata): Promise<any> {
+    const processManager = DriverProcessManager.getInstance();
+    
+    // Start the driver process
+    const processInfo = await processManager.startDriver(metadata);
+    
+    // Create the appropriate driver instance based on transport type
+    const transport = metadata.config?.transport || 'websocket';
+    
+    switch (transport) {
+      case 'websocket':
+        const { WebSocketDriverInstance } = await import('./transport/websocket.driver');
+        const wsInstance = new WebSocketDriverInstance(metadata, processInfo.port);
+        await wsInstance.start(); // Initialize the connection
+        return wsInstance;
+        
+      case 'http':
+        const { HttpDriverInstance } = await import('./transport/http.driver');
+        const httpInstance = new HttpDriverInstance(metadata, processInfo.port);
+        await httpInstance.start(); // Initialize the connection
+        return httpInstance;
+        
+      default:
+        throw new Error(`Unsupported transport type: ${transport}`);
+    }
+  }
+
+  /**
+   * Get driver metadata
+   */
+  public getDriver(driverId: string): DriverMetadata | undefined {
+    return this.drivers.get(driverId);
+  }
+
   /**
    * List all driver IDs
    */
   public listDriverIds(): string[] {
     return Array.from(this.drivers.keys());
   }
-  
+
   /**
-   * Start a driver process
+   * Stop a running driver
    */
-  public async startDriver(driverId: string): Promise<any> {
-    this.log.debug(`Starting driver: ${driverId}`);
-    
-    const driver = this.getDriver(driverId);
-    if (!driver) {
-      throw new Error(`Driver not found: ${driverId}`);
-    }
-    
-    // Check if driver is already running
-    if (this.isDriverRunning(driverId)) {
-      this.log.debug(`Driver ${driverId} is already running`);
-      return this.createDriverInterface(driverId);
-    }
-    
-    // Allocate port for the driver
-    const port = this.allocatePort();
-    
-    // Get executable path
-    let executablePath: string;
-    if (path.isAbsolute(driver.executable)) {
-      executablePath = driver.executable;
-    } else {
-      executablePath = path.join(driver.directory, driver.executable);
-    }
-    
-    // Make executable path OS-specific for binary drivers
-    if (process.platform === 'win32' && !executablePath.endsWith('.js') && !executablePath.endsWith('.exe')) {
-      executablePath += '.exe';
-    } else if (process.platform !== 'win32' && !executablePath.endsWith('.js')) {
-      // For Unix systems, ensure executable has proper permissions
-      try {
-        await fs.promises.chmod(executablePath, '755');
-      } catch (error) {
-        this.log.warn(`Failed to set executable permissions: ${error}`);
-      }
-    }
-    
-    // Check if executable exists
-    if (!fs.existsSync(executablePath)) {
-      throw new Error(`Driver executable not found: ${executablePath}`);
-    }
-    
-    // Common environment variables for the driver
-    const env = {
-      ...process.env,
-      RUNIX_DRIVER_PORT: port.toString(),
-      RUNIX_DRIVER_ID: driverId,
-      RUNIX_DRIVER_LOG_LEVEL: process.env.RUNIX_LOG_LEVEL || 'info'
-    };
-    
-    // Start the driver process
-    let driverProcess: ChildProcess;
-    
-    // Handle JavaScript vs binary driver executables
-    if (executablePath.endsWith('.js')) {
-      // JavaScript driver
-      driverProcess = spawn('node', [executablePath, '--port', port.toString()], {
-        cwd: driver.directory,
-        env,
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
-    } else {
-      // Binary driver
-      driverProcess = spawn(executablePath, ['--port', port.toString()], {
-        cwd: driver.directory,
-        env,
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
-    }
-    
-    // Setup process logging
-    if (driverProcess.stdout) {
-      driverProcess.stdout.on('data', (data) => {
-        this.log.debug(`[${driverId}] ${data.toString().trim()}`);
-      });
-    }
-    
-    if (driverProcess.stderr) {
-      driverProcess.stderr.on('data', (data) => {
-        this.log.warn(`[${driverId}] ${data.toString().trim()}`);
-      });
-    }
-    
-    // Handle process exit
-    driverProcess.on('exit', (code, signal) => {
-      this.log.info(`Driver ${driverId} exited with code ${code} and signal ${signal}`);
-      this.processes.delete(driverId);
+  public async stopDriver(driverId: string): Promise<void> {
+    const traceId = this.log.logMethodEntry('stopDriver', { 
+      component: 'DriverRegistry',
+      driverId 
     });
     
-    // Store process info
-    const processInfo: DriverProcessInfo = {
-      id: driverId,
-      process: driverProcess,
-      port,
-      metadata: driver,
-      status: 'starting'
-    };
-    
-    this.processes.set(driverId, processInfo);
-    
-    // Wait for driver to become ready
-    await this.waitForDriverReady(driverId, port, driver.protocol);
-    
-    // Create and return driver interface
-    return this.createDriverInterface(driverId);
-  }
-  
-  /**
-   * Wait for driver to become ready by querying its health endpoint
-   */
-  private async waitForDriverReady(driverId: string, port: number, protocol: string): Promise<void> {
-    const maxRetries = 30;
-    const retryInterval = 100;
-    
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        if (protocol === 'websocket') {
-          await this.checkWebSocketHealth(port);
-        } else {
-          await this.checkHttpHealth(port);
-        }
-        
-        // If we reach here, the driver is ready
-        const processInfo = this.processes.get(driverId);
-        if (processInfo) {
-          processInfo.status = 'running';
-        }
-        
-        this.log.debug(`Driver ${driverId} is ready on port ${port}`);
+    try {
+      const instance = this.processes.get(driverId);
+      if (!instance) {
+        this.log.debug('Driver not running, nothing to stop', { traceId, driverId });
+        this.log.logMethodExit('stopDriver', traceId, { driverId, wasRunning: false });
         return;
-      } catch (error) {
-        if (i === maxRetries - 1) {
-          const processInfo = this.processes.get(driverId);
-          if (processInfo) {
-            processInfo.status = 'error';
-            try {
-              processInfo.process.kill();
-            } catch (e) {
-              // Ignore errors killing the process
-            }
-          }
-          
-          throw new Error(`Timeout waiting for driver ${driverId} to become ready: ${error}`);
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, retryInterval));
       }
-    }
-  }
-  
-  /**
-   * Check if WebSocket driver is ready
-   */
-  private async checkWebSocketHealth(port: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      try {
-        const ws = new WebSocket(`ws://localhost:${port}`);
-        
-        const timeout = setTimeout(() => {
-          ws.close();
-          reject(new Error('WebSocket connection timed out'));
-        }, 2000);
-        
-        ws.on('open', () => {
-          // Send health check request
-          const request = {
-            id: uuidv4(),
-            method: 'health',
-            params: {}
-          };
-          
-          ws.send(JSON.stringify(request));
-        });
-        
-        ws.on('message', (data) => {
-          try {
-            const response = JSON.parse(data.toString());
-            
-            if (response.result && response.result.status === 'ok') {
-              clearTimeout(timeout);
-              ws.close();
-              resolve();
-            } else {
-              clearTimeout(timeout);
-              ws.close();
-              reject(new Error('Driver health check failed'));
-            }
-          } catch (err) {
-            clearTimeout(timeout);
-            ws.close();
-            reject(err);
-          }
-        });
-        
-        ws.on('error', (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        });
-      } catch (error) {
-        reject(error);
+
+      this.log.debug('Stopping driver instance', { traceId, driverId });
+      
+      // Stop the driver instance if it has a stop method
+      if (typeof instance.stop === 'function') {
+        await instance.stop();
+        this.log.trace('Driver instance stopped', { traceId, driverId });
       }
-    });
-  }
-  
-  /**
-   * Check if HTTP driver is ready
-   */
-  private async checkHttpHealth(port: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const request = http.get(`http://localhost:${port}/health`, (res) => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`Health check failed with status: ${res.statusCode}`));
-          return;
-        }
-        
-        let data = '';
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-        
-        res.on('end', () => {
-          try {
-            const response = JSON.parse(data);
-            if (response.status === 'ok') {
-              resolve();
-            } else {
-              reject(new Error('Driver health check failed'));
-            }
-          } catch (err) {
-            reject(err);
-          }
-        });
+
+      // Clean up the process using the process manager
+      const processManager = DriverProcessManager.getInstance();
+      await processManager.stopDriver(driverId);
+      
+      // Remove from our processes map
+      this.processes.delete(driverId);
+      
+      this.log.info('Driver stopped successfully', { 
+        traceId,
+        component: 'DriverRegistry',
+        driverId
       });
       
-      request.on('error', reject);
-      request.end();
-    });
-  }
-  
-  /**
-   * Create driver interface for communicating with the driver
-   */
-  private createDriverInterface(driverId: string): any {
-    const processInfo = this.processes.get(driverId);
-    if (!processInfo) {
-      throw new Error(`Driver process not found: ${driverId}`);
-    }
-    
-    const { port, metadata } = processInfo;
-    
-    // Create appropriate interface based on protocol
-    if (metadata.protocol === 'websocket') {
-      return this.createWebSocketInterface(driverId, port, metadata);
-    } else {
-      return this.createHttpInterface(driverId, port, metadata);
+      this.log.logMethodExit('stopDriver', traceId, { driverId, success: true });
+      
+    } catch (error) {
+      this.log.logMethodError('stopDriver', traceId, error instanceof Error ? error : new Error(String(error)), {
+        component: 'DriverRegistry',
+        driverId
+      });
+      throw error;
     }
   }
-  
-  /**
-   * Create WebSocket interface for communicating with the driver
-   */
-  private createWebSocketInterface(driverId: string, port: number, metadata: DriverMetadata): any {
-    const log = this.log;
-    
-    // Return driver interface object
-    return {
-      id: driverId,
-      metadata,
-      
-      async start(): Promise<any> {
-        // Get driver capabilities
-        const requestId = uuidv4();
-        
-        return new Promise((resolve, reject) => {
-          const ws = new WebSocket(`ws://localhost:${port}`);
-          
-          const timeout = setTimeout(() => {
-            ws.close();
-            reject(new Error('WebSocket connection timed out'));
-          }, 5000);
-          
-          ws.on('open', () => {
-            // Send capabilities request
-            const request = {
-              id: requestId,
-              method: 'capabilities',
-              params: {}
-            };
-            
-            ws.send(JSON.stringify(request));
-          });
-          
-          ws.on('message', (data) => {
-            try {
-              const response = JSON.parse(data.toString());
-              
-              if (response.id === requestId) {
-                clearTimeout(timeout);
-                ws.close();
-                
-                if (response.error) {
-                  reject(new Error(response.error.message));
-                } else {
-                  resolve(response.result);
-                }
-              }
-            } catch (err) {
-              clearTimeout(timeout);
-              ws.close();
-              reject(err);
-            }
-          });
-          
-          ws.on('error', (err) => {
-            clearTimeout(timeout);
-            reject(err);
-          });
-        });
-      },
-      
-      async initialize(config: any): Promise<any> {
-        // Initialize driver with configuration
-        const requestId = uuidv4();
-        
-        return new Promise((resolve, reject) => {
-          const ws = new WebSocket(`ws://localhost:${port}`);
-          
-          const timeout = setTimeout(() => {
-            ws.close();
-            reject(new Error('WebSocket connection timed out'));
-          }, 5000);
-          
-          ws.on('open', () => {
-            // Send initialize request
-            const request = {
-              id: requestId,
-              method: 'initialize',
-              params: config || {}
-            };
-            
-            ws.send(JSON.stringify(request));
-          });
-          
-          ws.on('message', (data) => {
-            try {
-              const response = JSON.parse(data.toString());
-              
-              if (response.id === requestId) {
-                clearTimeout(timeout);
-                ws.close();
-                
-                if (response.error) {
-                  reject(new Error(response.error.message));
-                } else {
-                  resolve(response.result);
-                }
-              }
-            } catch (err) {
-              clearTimeout(timeout);
-              ws.close();
-              reject(err);
-            }
-          });
-          
-          ws.on('error', (err) => {
-            clearTimeout(timeout);
-            reject(err);
-          });
-        });
-      },
-      
-      async execute(action: string, args: any[]): Promise<any> {
-        // Execute action on the driver
-        const requestId = uuidv4();
-        
-        return new Promise((resolve, reject) => {
-          const ws = new WebSocket(`ws://localhost:${port}`);
-          
-          const timeout = setTimeout(() => {
-            ws.close();
-            reject(new Error('WebSocket connection timed out'));
-          }, 30000); // Longer timeout for actions
-          
-          ws.on('open', () => {
-            // Send execute request
-            const request = {
-              id: requestId,
-              method: 'execute',
-              params: {
-                action,
-                args
-              }
-            };
-            
-            ws.send(JSON.stringify(request));
-          });
-          
-          ws.on('message', (data) => {
-            try {
-              const response = JSON.parse(data.toString());
-              
-              if (response.id === requestId) {
-                clearTimeout(timeout);
-                ws.close();
-                
-                if (response.error) {
-                  reject(new Error(response.error.message));
-                } else {
-                  resolve(response.result);
-                }
-              }
-            } catch (err) {
-              clearTimeout(timeout);
-              ws.close();
-              reject(err);
-            }
-          });
-          
-          ws.on('error', (err) => {
-            clearTimeout(timeout);
-            reject(err);
-          });
-        });
-      },
-      
-      async shutdown(): Promise<void> {
-        // Shutdown the driver
-        try {
-          const requestId = uuidv4();
-          
-          return new Promise((resolve, reject) => {
-            const ws = new WebSocket(`ws://localhost:${port}`);
-            
-            const timeout = setTimeout(() => {
-              ws.close();
-              resolve(); // Resolve anyway on timeout
-            }, 2000);
-            
-            ws.on('open', () => {
-              // Send shutdown request
-              const request = {
-                id: requestId,
-                method: 'shutdown',
-                params: {}
-              };
-              
-              ws.send(JSON.stringify(request));
-            });
-            
-            ws.on('message', (data) => {
-              clearTimeout(timeout);
-              ws.close();
-              resolve();
-            });
-            
-            ws.on('error', () => {
-              clearTimeout(timeout);
-              resolve(); // Resolve anyway on error
-            });
-          });
-        } finally {
-          // Kill the process regardless of shutdown request success
-          const processInfo = DriverRegistry.getInstance().getDriverProcess(driverId);
-          if (processInfo) {
-            try {
-              processInfo.process.kill();
-              log.debug(`Killed driver process: ${driverId}`);
-            } catch (e) {
-              log.warn(`Error killing driver process: ${driverId}`, { error: e });
-            }
-          }
-        }
-      }
-    };
-  }
-  
-  /**
-   * Create HTTP interface for communicating with the driver
-   */
-  private createHttpInterface(driverId: string, port: number, metadata: DriverMetadata): any {
-    const log = this.log;
-    
-    // Return driver interface object
-    return {
-      id: driverId,
-      metadata,
-      
-      async start(): Promise<any> {
-        // Get driver capabilities
-        return new Promise((resolve, reject) => {
-          const request = http.get(`http://localhost:${port}/capabilities`, (res) => {
-            if (res.statusCode !== 200) {
-              reject(new Error(`Capabilities request failed with status: ${res.statusCode}`));
-              return;
-            }
-            
-            let data = '';
-            res.on('data', (chunk) => {
-              data += chunk;
-            });
-            
-            res.on('end', () => {
-              try {
-                const response = JSON.parse(data);
-                resolve(response);
-              } catch (err) {
-                reject(err);
-              }
-            });
-          });
-          
-          request.on('error', reject);
-          request.end();
-        });
-      },
-      
-      async initialize(config: any): Promise<any> {
-        // Initialize driver with configuration
-        return new Promise((resolve, reject) => {
-          const data = JSON.stringify(config || {});
-          
-          const options = {
-            hostname: 'localhost',
-            port,
-            path: '/initialize',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Content-Length': data.length
-            }
-          };
-          
-          const request = http.request(options, (res) => {
-            if (res.statusCode !== 200) {
-              reject(new Error(`Initialize request failed with status: ${res.statusCode}`));
-              return;
-            }
-            
-            let responseData = '';
-            res.on('data', (chunk) => {
-              responseData += chunk;
-            });
-            
-            res.on('end', () => {
-              try {
-                const response = JSON.parse(responseData);
-                resolve(response);
-              } catch (err) {
-                reject(err);
-              }
-            });
-          });
-          
-          request.on('error', reject);
-          request.write(data);
-          request.end();
-        });
-      },
-      
-      async execute(action: string, args: any[]): Promise<any> {
-        // Execute action on the driver
-        return new Promise((resolve, reject) => {
-          const data = JSON.stringify({
-            action,
-            args
-          });
-          
-          const options = {
-            hostname: 'localhost',
-            port,
-            path: '/execute',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Content-Length': data.length
-            }
-          };
-          
-          const request = http.request(options, (res) => {
-            if (res.statusCode !== 200) {
-              reject(new Error(`Execute request failed with status: ${res.statusCode}`));
-              return;
-            }
-            
-            let responseData = '';
-            res.on('data', (chunk) => {
-              responseData += chunk;
-            });
-            
-            res.on('end', () => {
-              try {
-                const response = JSON.parse(responseData);
-                resolve(response);
-              } catch (err) {
-                reject(err);
-              }
-            });
-          });
-          
-          request.on('error', reject);
-          request.write(data);
-          request.end();
-        });
-      },
-      
-      async shutdown(): Promise<void> {
-        // Shutdown the driver
-        try {
-          return new Promise((resolve) => {
-            const request = http.get(`http://localhost:${port}/shutdown`, () => {
-              resolve();
-            });
-            
-            request.on('error', () => {
-              resolve(); // Resolve anyway on error
-            });
-            
-            request.end();
-            
-            // Resolve after timeout regardless of response
-            setTimeout(resolve, 1000);
-          });
-        } finally {
-          // Kill the process regardless of shutdown request success
-          const processInfo = DriverRegistry.getInstance().getDriverProcess(driverId);
-          if (processInfo) {
-            try {
-              processInfo.process.kill();
-              log.debug(`Killed driver process: ${driverId}`);
-            } catch (e) {
-              log.warn(`Error killing driver process: ${driverId}`, { error: e });
-            }
-          }
-        }
-      }
-    };
-  }
-  
-  /**
-   * Allocate a port for a driver
-   */
-  private allocatePort(): number {
-    // Simple port allocation strategy
-    return this.portCounter++;
-  }
-  
-  /**
-   * Check if a driver is running
-   */
-  public isDriverRunning(driverId: string): boolean {
-    const processInfo = this.processes.get(driverId);
-    return !!processInfo && processInfo.status === 'running';
-  }
-  
-  /**
-   * Get a driver process info
-   */
-  public getDriverProcess(driverId: string): DriverProcessInfo | undefined {
-    return this.processes.get(driverId);
-  }
-  
-  /**
-   * Get a list of all running drivers
-   */
-  public getRunningDrivers(): string[] {
-    return Array.from(this.processes.keys());
-  }
-  
+
   /**
    * Stop all running drivers
    */
   public async stopAllDrivers(): Promise<void> {
-    const driverIds = Array.from(this.processes.keys());
+    const traceId = this.log.logMethodEntry('stopAllDrivers', { 
+      component: 'DriverRegistry',
+      runningDriverCount: this.processes.size
+    });
     
-    for (const driverId of driverIds) {
-      try {
-        const driverInterface = this.createDriverInterface(driverId);
-        await driverInterface.shutdown();
-      } catch (error) {
-        this.log.warn(`Error stopping driver ${driverId}: ${error}`);
-      }
+    try {
+      const runningDriverIds = Array.from(this.processes.keys());
+      this.log.debug('Stopping all running drivers', { 
+        traceId,
+        runningDriverIds,
+        count: runningDriverIds.length
+      });
+      
+      // Stop all drivers in parallel
+      await Promise.all(
+        runningDriverIds.map(driverId => 
+          this.stopDriver(driverId).catch(error => {
+            this.log.error(`Failed to stop driver ${driverId}`, { traceId, driverId }, error);
+          })
+        )
+      );
+      
+      this.log.info('All drivers stopped', { 
+        traceId,
+        component: 'DriverRegistry',
+        stoppedCount: runningDriverIds.length
+      });
+      
+      this.log.logMethodExit('stopAllDrivers', traceId, { 
+        stoppedCount: runningDriverIds.length 
+      });
+      
+    } catch (error) {
+      this.log.logMethodError('stopAllDrivers', traceId, error instanceof Error ? error : new Error(String(error)), {
+        component: 'DriverRegistry'
+      });
+      throw error;
     }
   }
 
   /**
-   * Verify driver folders and update the bin/driver-manifest.json
+   * Check if a driver is currently running
    */
-  async verifyDrivers(): Promise<void> {
-    const manifestPath = path.join(process.cwd(), 'bin', 'driver-manifest.json');
-    if (!fs.existsSync(manifestPath)) {
-      fs.writeFileSync(manifestPath, JSON.stringify({ drivers: [] }, null, 2), 'utf8');
-    }
-    // Treat manifest as having a drivers array of any
-    interface Manifest { drivers: any[] }
-    const manifest: Manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    if (!Array.isArray(manifest.drivers)) manifest.drivers = [];
-
-    const scanDirs = [ path.join(process.cwd(), 'bin', 'drivers'), path.join(process.cwd(), 'drivers') ];
-    for (const dir of scanDirs) {
-      if (!fs.existsSync(dir)) continue;
-      for (const name of fs.readdirSync(dir)) {
-        const drvPath = path.join(dir, name);
-        if (!fs.statSync(drvPath).isDirectory()) continue;
-
-        let info: any = { name, path: drvPath };
-        const jsonPath = path.join(drvPath, 'driver.json');
-        if (fs.existsSync(jsonPath)) {
-          try { Object.assign(info, JSON.parse(fs.readFileSync(jsonPath, 'utf8'))); } catch {}
-        }
-
-        const exe = info.executable || 'index.js';
-        info.executable = fs.existsSync(path.join(drvPath, exe)) ? exe : info.executable;
-
-        // explicit any for callback parameter
-        const idx = manifest.drivers.findIndex((d: any) =>
-          d.name === name || path.normalize(d.path) === drvPath
-        );
-        if (idx >= 0) manifest.drivers[idx] = { ...manifest.drivers[idx], ...info };
-        else manifest.drivers.push(info);
-      }
-    }
-
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-    console.log(`Verified drivers, manifest updated.`);
+  public isDriverRunning(driverId: string): boolean {
+    return this.processes.has(driverId);
   }
-}
 
-if (require.main === module) {
-  const registry = DriverRegistry.getInstance();
-  const arg = process.argv[2];
-  if (arg === 'verify') {
-    registry.verifyDrivers().catch(err => {
-      console.error('Driver verification failed:', err);
-      process.exit(1);
-    });
-  } else {
-    console.log('Usage: ts-node src/drivers/driverRegistry.ts verify');
+  /**
+   * Get list of currently running driver IDs
+   */
+  public getRunningDriverIds(): string[] {
+    return Array.from(this.processes.keys());
   }
-}
-
-/**
- * Helper function to load drivers from a directory
- */
-export async function loadDriversFromDirectory(directory: string): Promise<void> {
-  const registry = DriverRegistry.getInstance();
-  
-  if (!fs.existsSync(directory)) {
-    console.warn(`Driver directory not found: ${directory}`);
-    return;
-  }
-  
-  console.log(`Loading drivers from ${directory}`);
-  await registry.discoverDrivers();
 }
