@@ -1,11 +1,9 @@
 # Runix
 
 <div align="center">
-    <img src="https://via.placeholder.com/200x200" alt="Runix Logo" width="200" height="200">
+    <img src="src/Runix.png" alt="Runix Logo" width="200" height="200">
     <h3>Modern Automation Engine for Behavior-Driven Development</h3>
 </div>
-
-### THIS IS CURRENTLY A WIP AND HAS HAD FILES REMOVED THAT DO NOT ALLOW IT TO BUILD. DEMONSTRATION PURPOSES ONLY. 05/02/2025
 
 [![CI](https://github.com/user/runix/actions/workflows/ci.yml/badge.svg)](https://github.com/user/runix/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
