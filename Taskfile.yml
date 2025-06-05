@@ -312,12 +312,12 @@ tasks:
       - echo "All components built successfully!"
       - echo ""
       - echo "🚀 Running comprehensive demonstration..."
-      - echo "📋 This includes both microservices and web automation examples"
+      - echo "📋 This includes microservices, web automation, system operations, vision processing, and AI orchestration examples"
       - echo ""
       - echo "1️⃣  Running example scenario with microservices architecture"
-      - cmd: cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_PORT=8090&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run tests/scenarios\example-driver.feature --driver=example-driver --driverConfig={\"timeout\":30000}"
+      - cmd: cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_PORT=8090&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run tests/scenarios\example-driver-comprehensive.feature --driver=example-driver --driverConfig={\"timeout\":30000}"
         platforms: [windows]
-      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_PORT=8090 RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run tests/scenarios/example-driver.feature --driver=example-driver --driverConfig='{\"timeout\":30000}'
+      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_PORT=8090 RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run tests/scenarios/example-driver-comprehensive.feature --driver=example-driver --driverConfig='{\"timeout\":30000}'
         platforms: [darwin, linux]
       - echo ""
       - echo "2️⃣  Running comprehensive web automation demo..."
@@ -326,10 +326,31 @@ tasks:
       - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run tests/scenarios/web-comprehensive-demo.feature --driver=web-driver --driverConfig='{\"headless\":false,\"screenshotDir\":\"screenshots\"}'
         platforms: [darwin, linux]
       - echo ""
-      - echo "🎉 Quickstart complete! You've seen both microservices and web automation in action."
+      - echo "3️⃣  Running system driver operations demo..."
+      - cmd: cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run tests/scenarios\system-driver-comprehensive.feature --driver=system-driver --driverConfig={\"workingDirectory\":\".\"}"
+        platforms: [windows]
+      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run tests/scenarios/system-driver-comprehensive.feature --driver=system-driver --driverConfig='{\"workingDirectory\":\".\"}'
+        platforms: [darwin, linux]
+      - echo ""
+      - echo "4️⃣  Running vision driver processing demo..."
+      - cmd: cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run tests/scenarios\vision-driver-comprehensive.feature --driver=vision-driver --driverConfig={\"confidenceThreshold\":0.7}"
+        platforms: [windows]
+      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run tests/scenarios/vision-driver-comprehensive.feature --driver=vision-driver --driverConfig='{\"confidenceThreshold\":0.7}'
+        platforms: [darwin, linux]
+      - echo ""
+      - echo "5️⃣  Running AI driver orchestration demo..."
+      - cmd: cmd /C "set RUNIX_LOG_SHOW_ORIGIN=true&& set RUNIX_DRIVER_DIR=%CD%\bin\drivers&& .\bin\runix.bat run tests/scenarios\ai-driver-comprehensive.feature --driver=ai-driver --driverConfig={\"model\":\"gpt-4\"}"
+        platforms: [windows]
+      - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run tests/scenarios/ai-driver-comprehensive.feature --driver=ai-driver --driverConfig='{\"model\":\"gpt-4\"}'
+        platforms: [darwin, linux]
+      - echo ""
+      - echo "🎉 Quickstart complete! You've seen microservices, web automation, system operations, vision processing, and AI orchestration in action."
       - echo "📊 Check runix-report.json for detailed results"
       - echo "📁 Check {{.LOG_DIR}} for execution logs"
       - echo "📸 Screenshots saved in screenshots/ directory"
+      - echo "🤖 AI orchestration capabilities demonstrated"
+      - echo "👁️  Computer vision processing showcased"
+      - echo "⚙️  System operations automated"
 
   quickstart:debug:
     desc: Setup and debug example with verbose logging

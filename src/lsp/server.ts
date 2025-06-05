@@ -24,7 +24,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
 import { parseFeatureFile, parseFeatureAst } from '../parser/parser';
 import { DriverRegistry, StepDefinition } from '../drivers/driverRegistry';
-import { DriverIntrospectionService } from './driverIntrospection';
+import { driverIntrospectionService } from './driverIntrospection';
 import { Logger } from '../utils/logger';
 
 // Create connection and documents
@@ -49,8 +49,7 @@ connection.onInitialize(async (params: InitializeParams) => {
   }
 
   // Get step definitions from all drivers
-  const introspectionService = DriverIntrospectionService.getInstance();
-  stepDefinitions = await introspectionService.getAllStepDefinitions();
+  stepDefinitions = await driverIntrospectionService.getAllStepDefinitions();
 
   // Fix: Use listDriverIds() instead of getAllDrivers()
   const driverIds = driverRegistry.listDriverIds();

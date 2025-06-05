@@ -1,0 +1,31 @@
+{
+  "id": "system-driver",
+  "name": "SystemDriver",
+  "description": "System-level operations driver for file I/O and process management",
+  "version": "1.0.0",
+  "author": "Runix Team",
+  "license": "MIT",
+  "executable": "index.js",
+  "protocol": "websocket",
+  "transport": "websocket",
+  "features": [
+    "execute",
+    "introspection",
+    "health-check"
+  ],
+  "actions": [
+    "createFile",
+    "readFile",
+    "writeFile", 
+    "deleteFile",
+    "executeCommand",
+    "startProcess",
+    "killProcess",
+    "listProcesses"
+  ],
+  "config": {
+    "workingDirectory": ".",
+    "allowedPaths": ["."],
+    "timeout": 30000
+  }
+}

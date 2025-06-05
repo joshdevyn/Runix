@@ -1,143 +1,113 @@
 {
-  "timestamp": "2025-06-03T13:17:07.601Z",
+  "timestamp": "2025-06-05T01:08:04.170Z",
   "results": [
     {
-      "success": true,
-      "step": "open the browser at \"https://example.com\"",
-      "data": {
-        "url": "https://example.com",
-        "title": "Example Domain"
+      "success": false,
+      "step": "I echo the message \"Hello Runix!\"",
+      "error": {
+        "name": "StepExecutionError",
+        "message": "Step execution failed: No matching step found: \"I echo the message \"Hello Runix!\"\"",
+        "errorCode": "STEP_EXECUTION_ERROR",
+        "context": {
+          "operation": "step_execution",
+          "traceId": "e4a763uf",
+          "stepText": "No matching step found: \"I echo the message \"Hello Runix!\"\"",
+          "timestamp": "2025-06-05T01:08:06.904Z",
+          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I echo the message \"Hello Runix!\"\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at C:\\snapshot\\_Runix\\dist\\index.js\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)"
+        }
       },
-      "duration": 1003,
-      "timestamp": "2025-06-03T13:17:13.084Z"
+      "timestamp": "2025-06-05T01:08:06.905Z"
     },
     {
-      "success": true,
-      "step": "take a screenshot \"01-homepage.png\"",
-      "data": {
-        "filename": "01-homepage.png",
-        "path": "C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\01-homepage.png"
+      "success": false,
+      "step": "I add 15 and 25",
+      "error": {
+        "name": "StepExecutionError",
+        "message": "Step execution failed: No matching step found: \"I add 15 and 25\"",
+        "errorCode": "STEP_EXECUTION_ERROR",
+        "context": {
+          "operation": "step_execution",
+          "traceId": "dhonzjxc",
+          "stepText": "No matching step found: \"I add 15 and 25\"",
+          "timestamp": "2025-06-05T01:08:06.907Z",
+          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I add 15 and 25\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async C:\\snapshot\\_Runix\\dist\\index.js"
+        }
       },
-      "duration": 112,
-      "timestamp": "2025-06-03T13:17:13.198Z"
+      "timestamp": "2025-06-05T01:08:06.907Z"
     },
     {
-      "success": true,
-      "step": "element \"h1\" should be visible",
-      "data": {
-        "element": "h1",
-        "visible": true
+      "success": false,
+      "step": "I wait for 500 milliseconds",
+      "error": {
+        "name": "StepExecutionError",
+        "message": "Step execution failed: No matching step found: \"I wait for 500 milliseconds\"",
+        "errorCode": "STEP_EXECUTION_ERROR",
+        "context": {
+          "operation": "step_execution",
+          "traceId": "trxsv2lx",
+          "stepText": "No matching step found: \"I wait for 500 milliseconds\"",
+          "timestamp": "2025-06-05T01:08:06.909Z",
+          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I wait for 500 milliseconds\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async C:\\snapshot\\_Runix\\dist\\index.js"
+        }
       },
-      "duration": 14,
-      "timestamp": "2025-06-03T13:17:13.215Z"
+      "timestamp": "2025-06-05T01:08:06.910Z"
     },
     {
-      "success": true,
-      "step": "element \"h1\" should contain text \"Example Domain\"",
-      "data": {
-        "element": "h1",
-        "expected": "Example Domain",
-        "actual": "Example Domain",
-        "matches": true
+      "success": false,
+      "step": "I echo the message \"Starting sequence\"",
+      "error": {
+        "name": "StepExecutionError",
+        "message": "Step execution failed: No matching step found: \"I echo the message \"Starting sequence\"\"",
+        "errorCode": "STEP_EXECUTION_ERROR",
+        "context": {
+          "operation": "step_execution",
+          "traceId": "9slqf7vg",
+          "stepText": "No matching step found: \"I echo the message \"Starting sequence\"\"",
+          "timestamp": "2025-06-05T01:08:06.912Z",
+          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I echo the message \"Starting sequence\"\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async C:\\snapshot\\_Runix\\dist\\index.js"
+        }
       },
-      "duration": 3,
-      "timestamp": "2025-06-03T13:17:13.219Z"
+      "timestamp": "2025-06-05T01:08:06.912Z"
     },
     {
-      "success": true,
-      "step": "open the browser at \"https://httpbin.org/forms/post\"",
-      "data": {
-        "url": "https://httpbin.org/forms/post",
-        "title": ""
+      "success": false,
+      "step": "I attempt an invalid operation",
+      "error": {
+        "name": "StepExecutionError",
+        "message": "Step execution failed: No matching step found: \"I attempt an invalid operation\"",
+        "errorCode": "STEP_EXECUTION_ERROR",
+        "context": {
+          "operation": "step_execution",
+          "traceId": "58s6prsa",
+          "stepText": "No matching step found: \"I attempt an invalid operation\"",
+          "timestamp": "2025-06-05T01:08:06.914Z",
+          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I attempt an invalid operation\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async C:\\snapshot\\_Runix\\dist\\index.js"
+        }
       },
-      "duration": 21862,
-      "timestamp": "2025-06-03T13:17:35.085Z"
+      "timestamp": "2025-06-05T01:08:06.915Z"
     },
     {
-      "success": true,
-      "step": "take a screenshot \"02-form-page.png\"",
-      "data": {
-        "filename": "02-form-page.png",
-        "path": "C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\02-form-page.png"
+      "success": false,
+      "step": "I perform multiple quick operations:",
+      "error": {
+        "name": "StepExecutionError",
+        "message": "Step execution failed: No matching step found: \"I perform multiple quick operations:\"",
+        "errorCode": "STEP_EXECUTION_ERROR",
+        "context": {
+          "operation": "step_execution",
+          "traceId": "xifwh800",
+          "stepText": "No matching step found: \"I perform multiple quick operations:\"",
+          "timestamp": "2025-06-05T01:08:06.917Z",
+          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I perform multiple quick operations:\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async C:\\snapshot\\_Runix\\dist\\index.js"
+        }
       },
-      "duration": 201,
-      "timestamp": "2025-06-03T13:17:35.288Z"
-    },
-    {
-      "success": true,
-      "step": "take a screenshot \"03-form-filled.png\"",
-      "data": {
-        "filename": "03-form-filled.png",
-        "path": "C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\03-form-filled.png"
-      },
-      "duration": 49,
-      "timestamp": "2025-06-03T13:17:35.341Z"
-    },
-    {
-      "success": true,
-      "step": "element \"input[name='email']\" should be visible",
-      "data": {
-        "element": "input[name='email']",
-        "visible": false
-      },
-      "duration": 4,
-      "timestamp": "2025-06-03T13:17:35.347Z"
-    },
-    {
-      "success": true,
-      "step": "element \"input[name='name']\" should be visible",
-      "data": {
-        "element": "input[name='name']",
-        "visible": false
-      },
-      "duration": 4,
-      "timestamp": "2025-06-03T13:17:35.354Z"
-    },
-    {
-      "success": true,
-      "step": "open the browser at \"https://httpbin.org/delay/1\"",
-      "data": {
-        "url": "https://httpbin.org/delay/1",
-        "title": ""
-      },
-      "duration": 7250,
-      "timestamp": "2025-06-03T13:17:42.607Z"
-    },
-    {
-      "success": true,
-      "step": "wait for element \"body\"",
-      "data": {
-        "element": "body",
-        "found": true
-      },
-      "duration": 13,
-      "timestamp": "2025-06-03T13:17:42.621Z"
-    },
-    {
-      "success": true,
-      "step": "take a screenshot \"04-delayed-content.png\"",
-      "data": {
-        "filename": "04-delayed-content.png",
-        "path": "C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\04-delayed-content.png"
-      },
-      "duration": 54,
-      "timestamp": "2025-06-03T13:17:42.678Z"
-    },
-    {
-      "success": true,
-      "step": "element \"body\" should be visible",
-      "data": {
-        "element": "body",
-        "visible": true
-      },
-      "duration": 8,
-      "timestamp": "2025-06-03T13:17:42.687Z"
+      "timestamp": "2025-06-05T01:08:06.918Z"
     }
   ],
   "summary": {
-    "total": 13,
-    "passed": 13,
-    "failed": 0,
-    "duration": 35087
+    "total": 6,
+    "passed": 0,
+    "failed": 6,
+    "duration": 2749
   }
 }

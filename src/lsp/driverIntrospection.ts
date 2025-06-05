@@ -1,307 +1,364 @@
 import WebSocket from 'ws';
-import * as http from 'http';
-import * as https from 'https';
-import { v4 as uuidv4 } from 'uuid';
-import { DriverMetadata, DriverRegistry, StepDefinition } from '../drivers/driverRegistry';
-import { DriverProcessManager, ProcessInfo } from '../drivers/driverProcessManager';
-import { Logger } from '../utils/logger';
 
 /**
- * Service for introspecting drivers to get completion data for the LSP
+ * Represents a step definition from a driver
+ */
+export interface StepDefinition {
+  id: string;
+  pattern: string;
+  action: string;
+  description: string;
+  examples?: string[];
+  parameters?: StepParameter[];
+  driver?: string;
+  confidence?: number;
+}
+
+/**
+ * Parameter definition for a step
+ */
+export interface StepParameter {
+  name: string;
+  type: string;
+  description: string;
+  required: boolean;
+}
+
+/**
+ * Driver capability information
+ */
+export interface DriverCapabilities {
+  name: string;
+  version: string;
+  description: string;
+  supportedActions: string[];
+  supportedFeatures?: string[];
+  features?: string[];
+}
+
+/**
+ * Driver connection info
+ */
+export interface DriverInfo {
+  id: string;
+  name: string;
+  port: number;
+  host?: string;
+  capabilities?: DriverCapabilities;
+  steps?: StepDefinition[];
+}
+
+/**
+ * Introspection response from driver
+ */
+export interface IntrospectionResponse {
+  id: string;
+  type: 'response';
+  result: {
+    steps?: StepDefinition[];
+    capabilities?: DriverCapabilities;
+  };
+  error?: {
+    code: number;
+    message: string;
+  };
+}
+
+/**
+ * Central driver introspection service
  */
 export class DriverIntrospectionService {
-  public static instance: DriverIntrospectionService;
-  private driverRegistry: DriverRegistry;
-  private processManager: DriverProcessManager;
-  private stepCache: Map<string, StepDefinition[]> = new Map();
-  private logger = Logger.getInstance();
-  
-  private constructor() {
-    this.driverRegistry = DriverRegistry.getInstance();
-    this.processManager = DriverProcessManager.getInstance();
+  private knownDrivers: Map<string, DriverInfo> = new Map();
+  private stepDefinitions: StepDefinition[] = [];
+  private logger = this.createLogger();
+
+  constructor() {
+    this.initializeKnownDrivers();
   }
-  
-  public static getInstance(): DriverIntrospectionService {
-    if (!DriverIntrospectionService.instance) {
-      DriverIntrospectionService.instance = new DriverIntrospectionService();
-    }
-    return DriverIntrospectionService.instance;
+
+  private createLogger() {
+    return {
+      log: (message: string, data?: any) => {
+        const timestamp = new Date().toISOString();
+        const dataStr = data ? ` ${JSON.stringify(data)}` : '';
+        console.log(`${timestamp} [INFO] [DriverIntrospectionService] ${message}${dataStr}`);
+      },
+      error: (message: string, data?: any) => {
+        const timestamp = new Date().toISOString();
+        const dataStr = data ? ` ${JSON.stringify(data)}` : '';
+        console.error(`${timestamp} [ERROR] [DriverIntrospectionService] ${message}${dataStr}`);
+      }
+    };
   }
 
   /**
-   * Get all step definitions from all registered drivers
+   * Initialize known drivers with their default ports
    */
-  public async getAllStepDefinitions(): Promise<StepDefinition[]> {
-    const allSteps: StepDefinition[] = [];
-    const driverIds = this.driverRegistry.listDriverIds();
-    
-    // First, include any statically defined steps from driver metadata
-    for (const driverId of driverIds) {
-      const driver = this.driverRegistry.getDriver(driverId);
-      if (driver) {
-        allSteps.push(...(driver.config?.supportedSteps || []));
-      }
-    }
-    
-    // Then, try to get dynamic steps from running drivers
-    for (const driverId of driverIds) {
-      const driver = this.driverRegistry.getDriver(driverId);
-      if (!driver) continue;
-      
-      try {
-        // Only introspect drivers that aren't already running if they support introspection
-        if (driver.config?.supportedFeatures?.includes('introspection') && 
-            !this.processManager.isDriverRunning(driver.id)) {
-          const steps = await this.getStepsFromDriver(driver);
-          if (steps.length > 0) {
-            allSteps.push(...steps);
-          }
+  private initializeKnownDrivers(): void {
+    const drivers: DriverInfo[] = [
+      { id: 'example-driver', name: 'ExampleDriver', port: 9000 },
+      { id: 'web-driver', name: 'WebDriver', port: 9001 },
+      { id: 'system-driver', name: 'SystemDriver', port: 9002 },
+      { id: 'vision-driver', name: 'VisionDriver', port: 9003 },
+      { id: 'ai-driver', name: 'AIDriver', port: 9004 }
+    ];
+
+    drivers.forEach(driver => {
+      this.knownDrivers.set(driver.id, driver);
+    });
+
+    this.logger.log(`Initialized ${drivers.length} known drivers`);
+  }
+
+  /**
+   * Connect to a driver via WebSocket
+   */
+  private async connectToDriver(driverInfo: DriverInfo): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      const host = driverInfo.host || '127.0.0.1';
+      const ws = new WebSocket(`ws://${host}:${driverInfo.port}`);
+
+      ws.on('open', () => {
+        this.logger.log(`Connected to ${driverInfo.name} at ${host}:${driverInfo.port}`);
+        resolve(ws);
+      });
+
+      ws.on('error', (error) => {
+        this.logger.error(`Failed to connect to ${driverInfo.name}:`, error);
+        reject(error);
+      });
+
+      // Set timeout for connection
+      setTimeout(() => {
+        if (ws.readyState !== WebSocket.OPEN) {
+          ws.close();
+          reject(new Error(`Connection timeout for ${driverInfo.name}`));
         }
-      } catch (err) {
-        this.logger.error(`Error introspecting driver ${driver.name}:`, { error: err instanceof Error ? err.message : String(err) });
-      }
-    }
-    
-    return allSteps;
+      }, 5000);
+    });
   }
 
   /**
-   * Get all drivers with their step definitions
+   * Send request to driver and wait for response
    */
-  public getDriversWithSteps(): { id: string, name: string, steps: StepDefinition[] }[] {
-    const result: { id: string, name: string, steps: StepDefinition[] }[] = [];
-    const driverIds = this.driverRegistry.listDriverIds();
-    
-    for (const driverId of driverIds) {
-      const driver = this.driverRegistry.getDriver(driverId);
-      if (!driver) continue;
-      
-      let steps: StepDefinition[] = driver.config?.supportedSteps || [];
-      
-      // Add steps from cache if available
-      if (this.stepCache.has(driver.id)) {
-        steps = this.stepCache.get(driver.id) || [];
-      }
-      
-      if (steps.length > 0) {
-        result.push({
-          id: driver.id,
-          name: driver.name,
-          steps
-        });
-      }
-    }
-    
-    return result;
+  private async sendDriverRequest(ws: WebSocket, request: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Request timeout'));
+      }, 10000);
+
+      ws.once('message', (data) => {
+        clearTimeout(timeout);
+        try {
+          const response = JSON.parse(data.toString());
+          resolve(response);
+        } catch (err) {
+          reject(err);
+        }
+      });
+
+      ws.send(JSON.stringify(request));
+    });
   }
 
   /**
-   * Query a running driver for its step definitions
+   * Get capabilities from a specific driver
    */
-  private async queryRunningDriver(port: number, protocol?: string): Promise<StepDefinition[]> {
-    const driverProtocol = protocol || 'websocket'; // Default to websocket
-    
-    switch (driverProtocol) {
-      case 'websocket':
-        return this.queryWebSocketDriver(port);
-      case 'http':
-        return this.queryHttpDriver(port);
-      default:
-        throw new Error(`Unsupported protocol for introspection: ${driverProtocol}`);
+  public async getDriverCapabilities(driverId: string): Promise<DriverCapabilities | null> {
+    const driverInfo = this.knownDrivers.get(driverId);
+    if (!driverInfo) {
+      this.logger.error(`Unknown driver: ${driverId}`);
+      return null;
+    }
+
+    try {
+      const ws = await this.connectToDriver(driverInfo);
+      
+      const request = {
+        id: `cap-${Date.now()}`,
+        method: 'capabilities'
+      };
+
+      const response = await this.sendDriverRequest(ws, request);
+      ws.close();
+
+      if (response.error) {
+        this.logger.error(`Capabilities error from ${driverId}:`, response.error);
+        return null;
+      }
+
+      driverInfo.capabilities = response.result;
+      return response.result;
+    } catch (error) {
+      this.logger.error(`Failed to get capabilities from ${driverId}:`, error);
+      return null;
     }
   }
 
   /**
    * Get step definitions from a specific driver
    */
-  public async getStepsFromDriver(driver: DriverMetadata): Promise<StepDefinition[]> {
-    // Check cache first
-    if (this.stepCache.has(driver.id)) {
-      return this.stepCache.get(driver.id)!;
-    }
-    
-    // If driver is already running, query it directly
-    if (this.processManager.isDriverRunning(driver.id)) {
-      const processInfo = this.processManager.getDriverProcess(driver.id);
-      if (processInfo) {
-        try {
-          const steps = await this.queryRunningDriver(processInfo.port, driver.config?.protocol);
-          this.stepCache.set(driver.id, steps);
-          return steps;
-        } catch (err) {
-          this.logger.error(`Error querying running driver ${driver.name}:`, { error: err instanceof Error ? err.message : String(err) });
-          return driver.config?.supportedSteps || [];
-        }
-      }
-    }
-    
-    // Otherwise, start the driver temporarily just to get step definitions
-    try {
-      // Start the driver
-      const processInfo = await this.processManager.startDriver(driver);
-      
-      // Query the driver for step definitions
-      const steps = await this.queryRunningDriver(processInfo.port, driver.config?.protocol);
-      
-      // Cache the results
-      this.stepCache.set(driver.id, steps);
-      
-      // Shutdown the driver if it was started just for introspection
-      await this.processManager.shutdownDriver(driver.id);
-      
-      return steps;
-    } catch (err) {
-      this.logger.error(`Error getting steps from driver ${driver.name}:`, { error: err instanceof Error ? err.message : String(err) });
-      return driver.config?.supportedSteps || [];
-    }
-  }
-
-  /**
-   * Query a WebSocket driver for its step definitions
-   */
-  private async queryWebSocketDriver(port: number): Promise<StepDefinition[]> {
-    return new Promise<StepDefinition[]>((resolve, reject) => {
-      const ws = new WebSocket(`ws://localhost:${port}`);
-      
-      const requestId = uuidv4();
-      let timeoutId: NodeJS.Timeout;
-      
-      ws.on('open', () => {
-        // Set a timeout for the request
-        timeoutId = setTimeout(() => {
-          ws.terminate();
-          reject(new Error('Request timed out'));
-        }, 5000);
-        
-        // Send introspection request
-        ws.send(JSON.stringify({
-          id: requestId,
-          type: 'request',
-          method: 'introspect',
-          params: { type: 'steps' }
-        }));
-      });
-      
-      ws.on('message', (data: WebSocket.Data) => {
-        try {
-          const response = JSON.parse(data.toString());
-          
-          if (response.id === requestId) {
-            clearTimeout(timeoutId);
-            ws.terminate();
-            
-            if (response.error) {
-              reject(new Error(response.error.message));
-            } else if (response.result && response.result.steps) {
-              resolve(response.result.steps);
-            } else {
-              resolve([]);
-            }
-          }
-        } catch (err) {
-          clearTimeout(timeoutId);
-          ws.terminate();
-          reject(err);
-        }
-      });
-      
-      ws.on('error', (err: Error) => {
-        clearTimeout(timeoutId);
-        ws.terminate();
-        reject(err);
-      });
-    });
-  }
-
-  /**
-   * Query an HTTP driver for its step definitions
-   */
-  private async queryHttpDriver(port: number): Promise<StepDefinition[]> {
-    return new Promise<StepDefinition[]>((resolve, reject) => {
-      const url = `http://localhost:${port}/introspect/steps`;
-      
-      http.get(url, (res) => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`HTTP request failed with status: ${res.statusCode}`));
-          return;
-        }
-        
-        let data = '';
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-        
-        res.on('end', () => {
-          try {
-            const response = JSON.parse(data);
-            if (response.steps && Array.isArray(response.steps)) {
-              resolve(response.steps);
-            } else {
-              resolve([]);
-            }
-          } catch (err) {
-            reject(err);
-          }
-        });
-      }).on('error', reject);
-    });
-  }
-
-  /**
-   * Clear the cache
-   */
-  public clearCache(): void {
-    this.stepCache.clear();
-  }
-
-  /**
-   * Get step definitions from all drivers without starting them
-   */
-  public async getAllStepDefinitionsStatic(): Promise<StepDefinition[]> {
-    const driverIds = this.driverRegistry.listDriverIds();
-    const allSteps: StepDefinition[] = [];
-
-    for (const driverId of driverIds) {
-      const steps = await this.getDriverStepDefinitionsStatic(driverId);
-      allSteps.push(...steps);
-    }
-
-    return allSteps;
-  }
-
-  /**
-   * Get step definitions for a specific driver without starting it
-   */
-  public async getDriverStepDefinitionsStatic(driverId: string): Promise<StepDefinition[]> {
-    if (this.stepCache.has(driverId)) {
-      return this.stepCache.get(driverId)!;
-    }
-
-    const driver = this.driverRegistry.getDriver(driverId);
-    
-    if (!driver) {
-      this.logger.warn(`Driver not found: ${driverId}`);
+  public async getDriverSteps(driverId: string): Promise<StepDefinition[]> {
+    const driverInfo = this.knownDrivers.get(driverId);
+    if (!driverInfo) {
+      this.logger.error(`Unknown driver: ${driverId}`);
       return [];
     }
 
-    // For LSP, we'll provide mock step definitions based on driver metadata
-    // In a real implementation, this could read from driver.json or other sources
-    const mockSteps: StepDefinition[] = [
-      {
-        id: `${driverId}-mock-action-1`,
-        pattern: `I perform action on "${driver.name}"`,
-        action: 'perform',
-        description: `Perform action using ${driver.name}`
-      },
-      {
-        id: `${driverId}-mock-action-2`,
-        pattern: `I execute command "(.*)" with "${driver.name}"`,
-        action: 'execute',
-        description: `Execute command using ${driver.name}`
-      }
-    ];
+    try {
+      const ws = await this.connectToDriver(driverInfo);
+      
+      const request = {
+        id: `steps-${Date.now()}`,
+        method: 'introspect',
+        params: { type: 'steps' }
+      };
 
-    this.stepCache.set(driverId, mockSteps);
-    return mockSteps;
+      const response: IntrospectionResponse = await this.sendDriverRequest(ws, request);
+      ws.close();
+
+      if (response.error) {
+        this.logger.error(`Steps error from ${driverId}:`, response.error);
+        return [];
+      }
+
+      const steps = response.result.steps || [];
+      
+      // Normalize step definitions
+      const normalizedSteps = steps.map(step => ({
+        ...step,
+        driver: driverInfo.name,
+        id: step.id || `${driverId}-${step.action}`,
+        parameters: step.parameters || []
+      }));
+
+      driverInfo.steps = normalizedSteps;
+      this.logger.log(`Retrieved ${normalizedSteps.length} steps from ${driverId}`);
+      
+      return normalizedSteps;
+    } catch (error) {
+      this.logger.error(`Failed to get steps from ${driverId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Discover and introspect all available drivers
+   */
+  public async discoverAllDrivers(): Promise<{
+    drivers: DriverInfo[];
+    totalSteps: number;
+    errors: string[];
+  }> {
+    this.logger.log('Starting driver discovery...');
+    
+    const discoveredDrivers: DriverInfo[] = [];
+    const errors: string[] = [];
+    let totalSteps = 0;
+
+    for (const [driverId, driverInfo] of this.knownDrivers) {
+      try {
+        // Get capabilities
+        const capabilities = await this.getDriverCapabilities(driverId);
+        if (capabilities) {
+          driverInfo.capabilities = capabilities;
+        }
+
+        // Get step definitions
+        const steps = await this.getDriverSteps(driverId);
+        if (steps.length > 0) {
+          driverInfo.steps = steps;
+          totalSteps += steps.length;
+          
+          // Add to global step definitions
+          this.stepDefinitions.push(...steps);
+          
+          discoveredDrivers.push({ ...driverInfo });
+        }
+      } catch (error) {
+        const errorMsg = `Failed to discover ${driverId}: ${error instanceof Error ? error.message : String(error)}`;
+        this.logger.error(errorMsg);
+        errors.push(errorMsg);
+      }
+    }
+
+    this.logger.log(`Discovery complete: ${discoveredDrivers.length} drivers, ${totalSteps} total steps`);
+
+    return {
+      drivers: discoveredDrivers,
+      totalSteps,
+      errors
+    };
+  }
+
+  /**
+   * Get all collected step definitions
+   */
+  public getAllStepDefinitions(): StepDefinition[] {
+    return [...this.stepDefinitions];
+  }
+
+  /**
+   * Search for steps by pattern or action
+   */
+  public searchSteps(query: string): StepDefinition[] {
+    const searchTerm = query.toLowerCase();
+    return this.stepDefinitions.filter(step =>
+      step.pattern.toLowerCase().includes(searchTerm) ||
+      step.action.toLowerCase().includes(searchTerm) ||
+      step.description.toLowerCase().includes(searchTerm) ||
+      (step.driver && step.driver.toLowerCase().includes(searchTerm))
+    );
+  }
+
+  /**
+   * Get steps by driver
+   */
+  public getStepsByDriver(driverName: string): StepDefinition[] {
+    return this.stepDefinitions.filter(step => step.driver === driverName);
+  }
+
+  /**
+   * Check if a driver is available
+   */
+  public async isDriverAvailable(driverId: string): Promise<boolean> {
+    const driverInfo = this.knownDrivers.get(driverId);
+    if (!driverInfo) return false;
+
+    try {
+      const ws = await this.connectToDriver(driverInfo);
+      
+      const request = {
+        id: `health-${Date.now()}`,
+        method: 'health'
+      };
+
+      const response = await this.sendDriverRequest(ws, request);
+      ws.close();
+
+      return response.result?.status === 'ok';
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Get driver registry information
+   */
+  public getDriverRegistry(): DriverInfo[] {
+    return Array.from(this.knownDrivers.values());
+  }
+
+  /**
+   * Refresh step definitions from all drivers
+   */
+  public async refreshStepDefinitions(): Promise<void> {
+    this.stepDefinitions = [];
+    await this.discoverAllDrivers();
   }
 }
+
+/**
+ * Default export - singleton instance
+ */
+export const driverIntrospectionService = new DriverIntrospectionService();

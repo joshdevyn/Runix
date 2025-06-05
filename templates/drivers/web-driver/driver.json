@@ -29,17 +29,17 @@
       "pattern": "enter (text) into the (field) field",
       "description": "Enters text into a field",
       "action": "enterText",
-      "examples": ["enter \"admin\" into the \"username\" field"],
+      "examples": ["enter \"john@example.com\" into the \"email\" field"],
       "parameters": [
         {
           "name": "text",
-          "description": "The text to enter",
+          "description": "Text to enter",
           "type": "string",
           "required": true
         },
         {
           "name": "field",
-          "description": "The field selector",
+          "description": "CSS selector for the field",
           "type": "string",
           "required": true
         }

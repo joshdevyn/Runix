@@ -21,158 +21,88 @@
 <body>
     <div class="header">
         <h1>Runix Test Report</h1>
-        <p>Generated: 2025-06-03T13:17:07.601Z</p>
-        <p>Duration: 35087ms</p>
+        <p>Generated: 2025-06-05T01:08:04.170Z</p>
+        <p>Duration: 2749ms</p>
     </div>
     
     <div class="summary">
         <div class="summary-card">
-            <h3>13</h3>
+            <h3>6</h3>
             <p>Total Steps</p>
         </div>
         <div class="summary-card passed">
-            <h3>13</h3>
+            <h3>0</h3>
             <p>Passed</p>
         </div>
         <div class="summary-card failed">
-            <h3>0</h3>
+            <h3>6</h3>
             <p>Failed</p>
         </div>
         <div class="summary-card">
-            <h3>100%</h3>
+            <h3>0%</h3>
             <p>Success Rate</p>
         </div>
     </div>
     
     <h2>Step Results</h2>
     
-        <div class="step success">
-            <strong>Step 1: open the browser at "https://example.com"</strong>
+        <div class="step failure">
+            <strong>Step 1: I echo the message "Hello Runix!"</strong>
             <div class="step-details">
-                <span class="duration">1003ms</span>
-                ✅ PASSED
-                <br>Data: {"url":"https://example.com","title":"Example Domain"}
+                <span class="duration">0ms</span>
+                ❌ FAILED
                 
+                <br><span class="error">Error: Step execution failed: No matching step found: "I echo the message "Hello Runix!""</span>
             </div>
         </div>
     
-        <div class="step success">
-            <strong>Step 2: take a screenshot "01-homepage.png"</strong>
+        <div class="step failure">
+            <strong>Step 2: I add 15 and 25</strong>
             <div class="step-details">
-                <span class="duration">112ms</span>
-                ✅ PASSED
-                <br>Data: {"filename":"01-homepage.png","path":"C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\01-homepage.png"}
+                <span class="duration">0ms</span>
+                ❌ FAILED
                 
+                <br><span class="error">Error: Step execution failed: No matching step found: "I add 15 and 25"</span>
             </div>
         </div>
     
-        <div class="step success">
-            <strong>Step 3: element "h1" should be visible</strong>
+        <div class="step failure">
+            <strong>Step 3: I wait for 500 milliseconds</strong>
             <div class="step-details">
-                <span class="duration">14ms</span>
-                ✅ PASSED
-                <br>Data: {"element":"h1","visible":true}
+                <span class="duration">0ms</span>
+                ❌ FAILED
                 
+                <br><span class="error">Error: Step execution failed: No matching step found: "I wait for 500 milliseconds"</span>
             </div>
         </div>
     
-        <div class="step success">
-            <strong>Step 4: element "h1" should contain text "Example Domain"</strong>
+        <div class="step failure">
+            <strong>Step 4: I echo the message "Starting sequence"</strong>
             <div class="step-details">
-                <span class="duration">3ms</span>
-                ✅ PASSED
-                <br>Data: {"element":"h1","expected":"Example Domain","actual":"Example Domain","matches":true}
+                <span class="duration">0ms</span>
+                ❌ FAILED
                 
+                <br><span class="error">Error: Step execution failed: No matching step found: "I echo the message "Starting sequence""</span>
             </div>
         </div>
     
-        <div class="step success">
-            <strong>Step 5: open the browser at "https://httpbin.org/forms/post"</strong>
+        <div class="step failure">
+            <strong>Step 5: I attempt an invalid operation</strong>
             <div class="step-details">
-                <span class="duration">21862ms</span>
-                ✅ PASSED
-                <br>Data: {"url":"https://httpbin.org/forms/post","title":""}
+                <span class="duration">0ms</span>
+                ❌ FAILED
                 
+                <br><span class="error">Error: Step execution failed: No matching step found: "I attempt an invalid operation"</span>
             </div>
         </div>
     
-        <div class="step success">
-            <strong>Step 6: take a screenshot "02-form-page.png"</strong>
+        <div class="step failure">
+            <strong>Step 6: I perform multiple quick operations:</strong>
             <div class="step-details">
-                <span class="duration">201ms</span>
-                ✅ PASSED
-                <br>Data: {"filename":"02-form-page.png","path":"C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\02-form-page.png"}
+                <span class="duration">0ms</span>
+                ❌ FAILED
                 
-            </div>
-        </div>
-    
-        <div class="step success">
-            <strong>Step 7: take a screenshot "03-form-filled.png"</strong>
-            <div class="step-details">
-                <span class="duration">49ms</span>
-                ✅ PASSED
-                <br>Data: {"filename":"03-form-filled.png","path":"C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\03-form-filled.png"}
-                
-            </div>
-        </div>
-    
-        <div class="step success">
-            <strong>Step 8: element "input[name='email']" should be visible</strong>
-            <div class="step-details">
-                <span class="duration">4ms</span>
-                ✅ PASSED
-                <br>Data: {"element":"input[name='email']","visible":false}
-                
-            </div>
-        </div>
-    
-        <div class="step success">
-            <strong>Step 9: element "input[name='name']" should be visible</strong>
-            <div class="step-details">
-                <span class="duration">4ms</span>
-                ✅ PASSED
-                <br>Data: {"element":"input[name='name']","visible":false}
-                
-            </div>
-        </div>
-    
-        <div class="step success">
-            <strong>Step 10: open the browser at "https://httpbin.org/delay/1"</strong>
-            <div class="step-details">
-                <span class="duration">7250ms</span>
-                ✅ PASSED
-                <br>Data: {"url":"https://httpbin.org/delay/1","title":""}
-                
-            </div>
-        </div>
-    
-        <div class="step success">
-            <strong>Step 11: wait for element "body"</strong>
-            <div class="step-details">
-                <span class="duration">13ms</span>
-                ✅ PASSED
-                <br>Data: {"element":"body","found":true}
-                
-            </div>
-        </div>
-    
-        <div class="step success">
-            <strong>Step 12: take a screenshot "04-delayed-content.png"</strong>
-            <div class="step-details">
-                <span class="duration">54ms</span>
-                ✅ PASSED
-                <br>Data: {"filename":"04-delayed-content.png","path":"C:\\_Runix\\bin\\drivers\\web-driver\\screenshots\\04-delayed-content.png"}
-                
-            </div>
-        </div>
-    
-        <div class="step success">
-            <strong>Step 13: element "body" should be visible</strong>
-            <div class="step-details">
-                <span class="duration">8ms</span>
-                ✅ PASSED
-                <br>Data: {"element":"body","visible":true}
-                
+                <br><span class="error">Error: Step execution failed: No matching step found: "I perform multiple quick operations:"</span>
             </div>
         </div>
     

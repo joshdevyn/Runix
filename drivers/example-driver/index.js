@@ -6,20 +6,40 @@ const url = require('url');
 const port = parseInt(process.env.RUNIX_DRIVER_PORT || '9000', 10);
 const manifest = require('./driver.json');
 
-// Simple logger for driver processes
-function log(message, ...args) {
-  const timestamp = new Date().toISOString();
-  const argsStr = args.length > 0 ? ` ${JSON.stringify(args)}` : '';
-  console.log(`${timestamp} [INFO] [index.js::ExampleDriver::handleMessage] ${message}${argsStr}`);
+// Create structured logger for driver processes
+function createDriverLogger() {
+  const getCallerInfo = () => {
+    const stack = new Error().stack;
+    if (!stack) return 'unknown';
+    
+    const lines = stack.split('\n');
+    for (let i = 3; i < lines.length; i++) {
+      const line = lines[i];
+      const match = line.match(/at\s+(\w+)\s*\(/);
+      if (match && match[1] !== 'log' && match[1] !== 'error') return match[1];
+    }
+    return 'unknown';
+  };
+
+  return {
+    log: (message, data = {}) => {
+      const caller = getCallerInfo();
+      const timestamp = new Date().toISOString();
+      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      console.log(`${timestamp} [INFO] [index.js::ExampleDriver::${caller}] ${message}${dataStr}`);
+    },
+    error: (message, data = {}) => {
+      const caller = getCallerInfo();
+      const timestamp = new Date().toISOString();
+      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      console.error(`${timestamp} [ERROR] [index.js::ExampleDriver::${caller}] ${message}${dataStr}`);
+    }
+  };
 }
 
-function logError(message, ...args) {
-  const timestamp = new Date().toISOString();
-  const argsStr = args.length > 0 ? ` ${JSON.stringify(args)}` : '';
-  console.error(`${timestamp} [ERROR] [index.js::ExampleDriver::handleMessage] ${message}${argsStr}`);
-}
+const logger = createDriverLogger();
 
-log(`Example Driver starting on port ${port}`);
+logger.log(`Example Driver starting on port ${port}`);
 
 // Create HTTP server and WebSocket server
 const server = http.createServer((req, res) => {
@@ -37,21 +57,21 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 
 wss.on('connection', function connection(ws) {
-  log('Client connected');
+  logger.log('Client connected');
   
   ws.on('message', function incoming(message) {
-    log(`Received: ${message}`);
+    logger.log(`Received: ${message}`);
     handleMessage(ws, message);
   });
   
   ws.on('close', function() {
-    log('Client disconnected');
+    logger.log('Client disconnected');
   });
 });
 
 server.listen(port, '127.0.0.1', () => {
-  log(`Example driver listening on 127.0.0.1:${port}`);
-  log(`WebSocket server ready for connections`);
+  logger.log(`Example driver listening on 127.0.0.1:${port}`);
+  logger.log(`WebSocket server ready for connections`);
 });
 
 // Handle incoming messages
@@ -61,7 +81,7 @@ function handleMessage(ws, message) {
     handleRequest(request).then(response => {
       ws.send(JSON.stringify(response));
     }).catch(err => {
-      logError('Error handling request:', err);
+      logger.error('Error handling request:', err);
       ws.send(JSON.stringify({
         id: request.id || '0',
         type: 'response',
@@ -72,7 +92,7 @@ function handleMessage(ws, message) {
       }));
     });
   } catch (err) {
-    logError('Error parsing message:', err);
+    logger.error('Error parsing message:', err);
   }
 }
 
@@ -107,7 +127,7 @@ async function handleRequest(request) {
       case 'initialize':
         // Initialize with config from params
         const config = request.params?.config || {};
-        log('Driver initialized with config', config);
+        logger.log('Driver initialized with config', config);
         return sendSuccessResponse(request.id, { initialized: true });
 
       case 'introspect':
@@ -137,7 +157,7 @@ async function handleRequest(request) {
 
 // Handle execute requests
 async function handleExecute(id, action, args) {
-  log(`Executing action: ${action}`, args);
+  logger.log(`Executing action: ${action}`, args);
   
   switch (action) {
     case 'introspect':
@@ -170,7 +190,7 @@ async function handleExecute(id, action, args) {
     case 'wait':
       return new Promise((resolve) => {
         const ms = Number(args[0]);
-        log(`Waiting for ${ms}ms`);
+        logger.log(`Waiting for ${ms}ms`);
         setTimeout(() => {
           resolve({
             id,
