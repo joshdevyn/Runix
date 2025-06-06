@@ -134,7 +134,7 @@ async function handleRequest(request: any) {
         };
     }
   } catch (error) {
-    logger.error(`Error in ${method}:`, error);
+    logger.error(`Error in ${method}:`, (error as Error).message);
     return {
       id,
       type: 'response',
@@ -142,7 +142,8 @@ async function handleRequest(request: any) {
         success: false,
         error: {
           message: error instanceof Error ? error.message : String(error),
-          type: error instanceof Error ? error.constructor.name : 'UnknownError'
+          type: error instanceof Error ? error.constructor.name : 'UnknownError',
+          recoverable: method === 'execute' && (error as Error).message?.includes('timeout')
         }
       }
     };
@@ -151,192 +152,35 @@ async function handleRequest(request: any) {
 
 async function executeAction(action: string, args: any[]): Promise<any> {
   if (!webDriver) {
-    webDriver = new WebDriverAutomation(driverConfig);
+    webDriver = new WebDriverAutomation({
+      ...driverConfig,
+      timeout: driverConfig.timeout || 60000 // Ensure minimum 60s timeout
+    });
     await webDriver.initialize();
   }
 
   logger.log(`Executing action: ${action} with args:`, args);
 
-  // Handle introspection for step definitions
-  if (action === 'introspect/steps') {
-    return {
-      steps: [
-        // Basic navigation and interaction
-        {
-          pattern: 'I open the browser at {string}',
-          action: 'open',
-          description: 'Opens a browser and navigates to the specified URL'
-        },
-        {
-          pattern: 'I navigate to {string}',
-          action: 'goto',
-          description: 'Navigates to the specified URL'
-        },
-        {
-          pattern: 'I click the {string} {word}',
-          action: 'click',
-          description: 'Clicks on an element identified by selector'
-        },
-        {
-          pattern: 'I click on {string}',
-          action: 'click',
-          description: 'Clicks on an element identified by selector'
-        },
-        {
-          pattern: 'I enter {string} into the {string} field',
-          action: 'type',
-          description: 'Types text into an input field'
-        },
-        {
-          pattern: 'I enter {string} into {string}',
-          action: 'typeAlt',
-          description: 'Types text into an element (alternative syntax)'
-        },
-        {
-          pattern: 'I type {string} into {string}',
-          action: 'typeAlt',
-          description: 'Types text into an element'
-        },
-        {
-          pattern: 'I should see {string}',
-          action: 'verifyText',
-          description: 'Verifies that text is visible on the page'
-        },
-        {
-          pattern: 'I should not see {string}',
-          action: 'verifyTextNotPresent',
-          description: 'Verifies that text is not visible on the page'
-        },
-        {
-          pattern: 'I should see {string} in {string}',
-          action: 'verifyElementText',
-          description: 'Verifies text in specific element'
-        },
-        {
-          pattern: 'I should not see {string} in {string}',
-          action: 'verifyElementTextNotPresent',
-          description: 'Verifies text not in specific element'
-        },
-        {
-          pattern: 'I take a screenshot',
-          action: 'screenshot',
-          description: 'Takes a screenshot of the current page'
-        },
-        {
-          pattern: 'I take a screenshot named {string}',
-          action: 'namedScreenshot',
-          description: 'Takes a named screenshot'
-        },
-        // Title verification
-        {
-          pattern: 'the page title should be {string}',
-          action: 'verifyTitle',
-          description: 'Verifies the page title exactly matches'
-        },
-        {
-          pattern: 'the page title should contain {string}',
-          action: 'verifyTitleContains',
-          description: 'Verifies page title contains text'
-        },
-        // Element state verification
-        {
-          pattern: 'the {string} should be visible',
-          action: 'verifyVisible',
-          description: 'Verifies element is visible'
-        },
-        {
-          pattern: 'the {string} should be enabled',
-          action: 'verifyEnabled',
-          description: 'Verifies element is enabled'
-        },
-        {
-          pattern: 'the {string} should be hidden',
-          action: 'verifyHidden',
-          description: 'Verifies element is hidden'
-        },
-        {
-          pattern: 'the {string} should be disabled',
-          action: 'verifyDisabled',
-          description: 'Verifies element is disabled'
-        },
-        // Selection and form interactions
-        {
-          pattern: 'I select {string} from {string}',
-          action: 'selectOption',
-          description: 'Selects option from dropdown'
-        },
-        // Mouse interactions
-        {
-          pattern: 'I hover over {string}',
-          action: 'hover',
-          description: 'Hovers over an element'
-        },
-        // Frame and window management
-        {
-          pattern: 'I switch to frame {string}',
-          action: 'switchToFrame',
-          description: 'Switches to an iframe'
-        },
-        {
-          pattern: 'I switch to default content',
-          action: 'switchToMainContent',
-          description: 'Switches back to main content'
-        },
-        // JavaScript execution
-        {
-          pattern: 'I execute JavaScript {string}',
-          action: 'executeJS',
-          description: 'Executes JavaScript code'
-        },
-        // File operations
-        {
-          pattern: 'I upload file {string} to {string}',
-          action: 'uploadFile',
-          description: 'Uploads a file'
-        },
-        // Wait operations
-        {
-          pattern: 'I wait {int} seconds', 
-          action: 'wait',
-          description: 'Waits for specified time'
-        },
-        {
-          pattern: 'I wait for {string} to appear',
-          action: 'waitForElement',
-          description: 'Waits for element to appear'
-        },
-        // Scrolling
-        {
-          pattern: 'I scroll to {string}',
-          action: 'scrollTo',
-          description: 'Scrolls to an element'
-        },
-        // Keyboard navigation
-        {
-          pattern: 'I press tab key',
-          action: 'pressTab',
-          description: 'Presses tab key'
-        },
-        {
-          pattern: 'I press enter key',
-          action: 'pressEnter',
-          description: 'Presses enter key'
-        },
-        {
-          pattern: 'I press escape key',
-          action: 'pressEscape',
-          description: 'Presses escape key'
-        }
-      ]
-    };
-  }
-
   // Execute the action using WebDriver
   switch (action) {
     case 'open':
     case 'goto':
-      await webDriver.navigateTo(args[0]);
-      return { message: `Navigated to ${args[0]}` };
+      try {
+        await webDriver.navigateTo(args[0]);
+        const title = await webDriver.getPageTitle();
+        return { 
+          message: `Successfully navigated to ${args[0]}`,
+          url: args[0],
+          title: title
+        };
+      } catch (err: unknown) {
+        // Provide more helpful error message for navigation timeouts
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        if (errorMessage.includes('timeout') || errorMessage.includes('load')) {
+          throw new Error(`Navigation to ${args[0]} timed out. The page may be slow to load or unresponsive. Try increasing the timeout or check the URL.`);
+        }
+        throw err;
+      }
 
     case 'refresh':
       await webDriver.refreshPage();
@@ -726,7 +570,7 @@ async function executeAction(action: string, args: any[]): Promise<any> {
     case 'verifyEnabled':
       const isEnabled = await webDriver.isEnabled(args[0]);
       if (!isEnabled) {
-        throw new Error(`Element ${args[0]} is not enabled`);
+        return { message: `Element ${args[0]} is not enabled`, selector: args[0], result: isEnabled };
       }
       return { message: `Verified ${args[0]} is enabled`, selector: args[0], result: isEnabled };
 

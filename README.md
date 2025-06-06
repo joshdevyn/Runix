@@ -15,47 +15,56 @@ Runix is a powerful, extensible automation engine that runs behavior-driven scen
 
 ## ✨ Features
 
+- 🤖 **Automatic Driver Loading**: Zero-configuration setup - automatically discovers and loads all available drivers
+- 🔀 **Dynamic Step Routing**: Intelligent pattern matching routes steps to the appropriate driver automatically
+- 🌐 **Multi-Driver Workflows**: Seamlessly combine steps from different drivers in a single feature file
 - 🚀 **Comprehensive Quickstart**: Get started with both microservices and web automation in one command
 - 🌐 **Advanced Web Automation**: Playwright-based web driver with screenshot capture and real browser support
 - ☑️ **Cucumber-compatible Syntax**: Write tests in easy-to-understand Gherkin language
-- 🔧 **Multiple Drivers**: Web, API, example drivers with extensible architecture
+- 🔧 **Multiple Drivers**: Web, API, system, vision, and AI drivers with extensible architecture
 - 📸 **Visual Testing**: Automatic screenshot capture for web automation verification
 - 🖥️ **Cross-browser Support**: Chromium, Firefox, and WebKit automation
 - 📦 **Database Integration**: Built-in support for major database systems
 - 🔄 **Parallel Execution**: Run multiple scenarios concurrently
 - 📊 **Detailed Reports**: Generate comprehensive test reports with visual artifacts
-- 🧩 **Extensible Architecture**: Add custom drivers and plugins
+- 🧩 **Plugin Architecture**: Easy driver development and deployment with hot-loading
+- 🤖 **AI-Driven Orchestration**: Intelligent step generation and workflow optimization
+- 🏢 **Enterprise Scaling**: Distributed driver execution for large-scale automation
 - 🔄 **CI/CD Integration**: Ready for your continuous integration pipeline
 - 💻 **Cross-Platform**: Available as binaries for Windows, macOS, and Linux
 - 🎯 **Language Server Protocol**: IDE integration with auto-completion and validation
 
 ## 🏗️ Architecture
 
-Runix consists of the following key components:
+Runix features a revolutionary **automatic driver loading** system with intelligent step routing:
 
-- **Parser**: Parses Gherkin feature files with AST-based validation
-- **Engine**: Executes scenarios and steps with driver communication
-- **Drivers**: Standalone executables that implement automation actions
-- **Web Driver**: Playwright-based browser automation with visual testing
-- **LSP Server**: Language Server Protocol support for IDE integration
-- **Database Adapters**: Connect to and interact with various database systems
-- **Report Generator**: Creates test result reports with screenshots
+- **Zero Configuration**: No more manual driver specification - Runix automatically discovers all available drivers
+- **Dynamic Routing**: Steps are intelligently routed to the appropriate driver based on pattern matching
+- **Multi-Driver Workflows**: Seamlessly combine steps from different drivers in a single feature file
+- **Enterprise Scaling**: Distributed driver execution for large-scale automation
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────────┐
-│  Gherkin    │     │   Engine    │     │   Web Driver    │
-│  Parser     │──►  │  Execution  │◄─── │  (Playwright)   │
-│ (AST-based) │     │   (LSP)     │     │   Screenshots   │
-└─────────────┘     └─────────────┘     └─────────────────┘
-                           │                     │
-                           ▼                     ▼
-            ┌─────────────────────────────┐   ┌─────────────┐
-            │   ┌─────────────────────┐   │   │   Visual    │
-            │   │ Database Adapters   │   │   │ Artifacts   │
-            │   └─────────────────────┘   │   │(Screenshots)│
-            │   ┌─────────────────────┐   │   └─────────────┘
-            │   │ HTML/JSON Reports   │   │
-            │   └─────────────────────┘   │
+┌─────────────┐     ┌─────────────────────┐     ┌─────────────────┐
+│  Gherkin    │     │  Auto-Discovery     │     │   Web Driver    │
+│  Parser     │──►  │   Engine with       │◄─── │  (Playwright)   │
+│ (AST-based) │     │ Dynamic Routing     │     │   Screenshots   │
+└─────────────┘     └─────────────────────┘     └─────────────────┘
+                           │                              │
+                           ▼                              ▼
+            ┌─────────────────────────────┐    ┌─────────────────┐
+            │     Driver Ecosystem        │    │   AI Driver     │
+            │ ┌─────────────────────────┐ │    │  (GPT-4/Claude) │
+            │ │    System Driver        │ │    │   Intelligent   │
+            │ │  (File Operations)      │ │    │   Orchestration │
+            │ └─────────────────────────┘ │    └─────────────────┘
+            │ ┌─────────────────────────┐ │    ┌─────────────────┐
+            │ │    Vision Driver        │ │    │   Visual        │
+            │ │  (OCR & UI Detection)   │ │    │   Artifacts     │
+            │ └─────────────────────────┘ │    │ (Screenshots)   │
+            │ ┌─────────────────────────┐ │    └─────────────────┘
+            │ │   Database Adapters     │ │
+            │ │   HTML/JSON Reports     │ │
+            │ └─────────────────────────┘ │
             └─────────────────────────────┘
 ```
 
@@ -155,25 +164,49 @@ task quickstart
 
 ### 2. Create a feature file
 
-Create a file named `web-test.feature`:
+Create a file named `multi-driver-demo.feature` to showcase the power of automatic driver loading:
 
 ```gherkin
-Feature: Web Automation Demo
+Feature: Multi-Driver Automation Demo
+  Demonstrate seamless integration between different automation drivers
 
-  Scenario: Complete web interaction workflow
-    Given open the browser at "https://example.com"
-    When take a screenshot "homepage-loaded.png"
-    Then element "h1" should be visible
-    And element "h1" should contain text "Example Domain"
-    And take a screenshot "verification-complete.png"
+  Scenario: Complete end-to-end workflow with multiple drivers
+    # System Driver: File operations
+    Given I create file "test-data.txt" with content "Hello from Runix!"
+    And I read file "test-data.txt"
+    
+    # Web Driver: Browser automation
+    When I open the browser at "https://httpbin.org/forms/post"
+    And I enter "Runix User" into the "custname" field
+    And I take a screenshot "form-filled.png"
+    
+    # Vision Driver: OCR and visual verification
+    Then I extract text from screenshot
+    And I analyze scene in screenshot
+    
+    # AI Driver: Intelligent orchestration
+    And I generate answer for "What automation steps were just completed?"
+    
+    # System Driver: Cleanup
+    Finally I delete file "test-data.txt"
 ```
 
 ### 3. Run the scenario
 
 ```bash
-# Run with web driver and screenshot capture
-runix run ./web-test.feature --driver=web-driver --driverConfig='{"headless":false,"screenshotDir":"screenshots"}'
+# 🚀 NEW: Zero configuration required! 
+# Runix automatically discovers and loads all drivers
+runix run ./multi-driver-demo.feature
+
+# 🎯 Old way (still supported for specific driver selection):
+# runix run ./web-test.feature --driver=web-driver --driverConfig='{"headless":false}'
 ```
+
+**What happens automatically:**
+1. 🔍 **Driver Discovery**: Runix finds all available drivers (web, system, vision, AI, etc.)
+2. 🧠 **Pattern Matching**: Each step is intelligently routed to the correct driver
+3. 🚀 **Lazy Loading**: Only initializes drivers that are actually needed
+4. ⚡ **Execution**: Seamless multi-driver workflow execution
 
 ### 4. View the results
 
@@ -279,36 +312,83 @@ Generated artifacts include:
 
 ## ⚡ Advanced Configuration
 
-You can create a configuration file for complex setups:
+### Multi-Driver Workflows
+
+Runix's automatic driver loading enables powerful multi-driver workflows:
+
+```gherkin
+Feature: Cross-Platform Automation
+  Scenario: Complete Business Process Automation
+    # System Driver: Data preparation
+    Given I create file "customer-data.csv" with content "name,email\nJohn,john@example.com"
+    
+    # Web Driver: Form submission  
+    When I open the browser at "https://myapp.com/customers"
+    And I upload file "customer-data.csv" to "#file-upload"
+    And I click the "Import" button
+    
+    # Vision Driver: Visual verification
+    Then I take a screenshot "import-result.png"
+    And I extract text from screenshot
+    And I detect UI elements in screenshot
+    
+    # AI Driver: Intelligent validation
+    And I analyze intent "Verify the customer import was successful"
+    And I generate answer for "What does the import result show?"
+    
+    # System Driver: Cleanup
+    And I delete file "customer-data.csv"
+```
+
+### Plugin Architecture
+
+Easily extend Runix with custom drivers:
+
+```bash
+# Install a new driver plugin
+runix plugin install my-custom-driver
+
+# List available driver plugins
+runix plugin list
+
+# Create a new driver from template
+runix create-driver --name="slack-driver" --template="communication"
+```
+
+### Enterprise Configuration
 
 ```json
 {
-  "driver": "web-driver",
+  "autoLoadDrivers": true,
   "driverConfig": {
-    "browserType": "chromium",
-    "headless": true,
-    "timeout": 30000,
-    "screenshotDir": "test-artifacts",
-    "viewport": {
-      "width": 1920,
-      "height": 1080
+    "system-driver": {
+      "securityLevel": "enterprise",
+      "allowedPaths": ["/app/data", "/tmp"]
+    },
+    "web-driver": {
+      "browserPool": 5,
+      "distributedExecution": true,
+      "headless": true
+    },
+    "ai-driver": {
+      "provider": "azure-openai",
+      "model": "gpt-4",
+      "rateLimiting": true
     }
   },
-  "database": {
-    "type": "postgres",
-    "host": "localhost",
-    "port": 5432,
-    "username": "testuser",
-    "password": "password",
-    "database": "testdb"
+  "scaling": {
+    "distributedDrivers": true,
+    "workerNodes": ["node1.company.com", "node2.company.com"],
+    "loadBalancing": "round-robin"
   },
   "reporting": {
     "outputDir": "./reports",
-    "formats": ["json", "html"],
-    "includeScreenshots": true
-  },
-  "parallelScenarios": true
+    "formats": ["json", "html", "junit"],
+    "includeScreenshots": true,
+    "realTimeReporting": true
+  }
 }
+```
 ```
 
 And run with:

@@ -72,99 +72,6 @@ tasks:
         platforms: [darwin, linux]
       # Build the drivers as executables
       - task: build-drivers
-
-  build-drivers:
-    desc: Build and install all example drivers as executables
-    cmds:
-      - echo "Building driver executables..."
-      # Build the example driver in its own directory first
-      - task: build-example-driver
-      # Build the web driver
-      - task: build-web-driver
-      # Ensure the driver directory exists in bin directory (Windows)
-      - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path {{.BIN_DIR}}/drivers/example-driver | Out-Null"
-        platforms: [windows]
-      # Copy the built executable and necessary files to bin directory (Windows)
-      - cmd: powershell -Command "if (Test-Path {{.DRIVERS_DIR}}/example-driver/ExampleDriver.exe) { Copy-Item {{.DRIVERS_DIR}}/example-driver/ExampleDriver.exe {{.BIN_DIR}}/drivers/example-driver/ -Force }"
-        platforms: [windows]
-      - cmd: powershell -Command "if (Test-Path {{.DRIVERS_DIR}}/example-driver/driver.json) { Copy-Item {{.DRIVERS_DIR}}/example-driver/driver.json {{.BIN_DIR}}/drivers/example-driver/ -Force }"
-        platforms: [windows]
-      
-      # Web driver installation (Windows)
-      - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path {{.BIN_DIR}}/drivers/web-driver | Out-Null"
-        platforms: [windows]
-      - cmd: powershell -Command "Copy-Item {{.DRIVERS_DIR}}/web-driver/WebDriver.exe {{.BIN_DIR}}/drivers/web-driver/ -Force"
-        platforms: [windows]
-      - cmd: powershell -Command "Copy-Item {{.DRIVERS_DIR}}/web-driver/driver.json {{.BIN_DIR}}/drivers/web-driver/ -Force"
-        platforms: [windows]
-      
-      # Ensure the driver directory exists in bin directory (Darwin/Linux)
-      - cmd: mkdir -p {{.BIN_DIR}}/drivers/example-driver
-        platforms: [darwin, linux]
-      # Copy the built executable and necessary files to bin directory (Darwin/Linux)
-      # Note: 'ExampleDriver' is the non-Windows executable name produced by build.js
-      - cmd: cp {{.DRIVERS_DIR}}/example-driver/ExampleDriver {{.BIN_DIR}}/drivers/example-driver/ExampleDriver
-        platforms: [darwin, linux]
-      - cmd: cp {{.DRIVERS_DIR}}/example-driver/driver.json {{.BIN_DIR}}/drivers/example-driver/driver.json
-        platforms: [darwin, linux]
-
-      # Web driver installation (Darwin/Linux)
-      - cmd: mkdir -p {{.BIN_DIR}}/drivers/web-driver
-        platforms: [darwin, linux]
-      - cmd: cp {{.DRIVERS_DIR}}/web-driver/WebDriver {{.BIN_DIR}}/drivers/web-driver/WebDriver
-        platforms: [darwin, linux]
-      - cmd: cp {{.DRIVERS_DIR}}/web-driver/driver.json {{.BIN_DIR}}/drivers/web-driver/driver.json
-        platforms: [darwin, linux]
-
-      # Generic script for other drivers or further processing (if any)
-      - cmd: bash scripts/build-drivers.sh {{.DRIVERS_DIR}} {{.BIN_DIR}}
-        platforms: [darwin, linux]
-      - echo "All driver executables built and installed"
-
-  build-example-driver:
-    desc: Build only the example driver executable
-    cmds:
-      - echo "Building example driver in {{.DRIVERS_DIR}}/example-driver"
-      - cmd: powershell -Command "Push-Location {{.DRIVERS_DIR}}/example-driver; npm install; npm run build; Pop-Location"
-        platforms: [windows]
-      - cmd: cd {{.DRIVERS_DIR}}/example-driver && npm install && npm run build && cd -
-        platforms: [darwin, linux]
-
-  build-web-driver:
-    desc: Build only the web driver executable
-    cmds:
-      - echo "Building web driver in {{.DRIVERS_DIR}}/web-driver"
-      - cmd: powershell -Command "Push-Location {{.DRIVERS_DIR}}/web-driver; if (!(Test-Path package.json)) { npm init -y }; npm install playwright ws --omit=dev; npm run build; Pop-Location"
-        platforms: [windows]
-      - cmd: cd {{.DRIVERS_DIR}}/web-driver && if [ ! -f package.json ]; then npm init -y; fi && npm install playwright ws --omit=dev && npm run build && cd -
-        platforms: [darwin, linux]
-
-  # Test tasks
-  test:
-    desc: Run all tests
-    cmds:
-      - jest
-
-  test:unit:
-    desc: Run unit tests
-    cmds:
-      - jest --testPathPattern=tests/unit
-
-  test:integration:
-    desc: Run integration tests
-    cmds:
-      - jest --testPathPattern=tests/integration
-
-  test:e2e:
-    desc: Run end-to-end tests
-    cmds:
-      - jest --testPathPattern=tests/e2e
-      
-  test:coverage:
-    desc: Run tests with coverage
-    cmds:
-      - jest --coverage
-
   verify-drivers:
     desc: Verify that drivers are correctly installed and accessible
     cmds:
@@ -192,6 +99,14 @@ tasks:
       vars: [PORT, FEATURE_PATH, DRIVER]
 
   # Driver tasks
+  build-drivers:
+    desc: Build all drivers as standalone executables
+    cmds:
+      - cmd: powershell -Command "scripts/build-drivers.ps1 -sourceDir drivers -destDir bin"
+        platforms: [windows]
+      - cmd: bash scripts/build-drivers.sh drivers bin
+        platforms: [darwin, linux]
+
   create-driver:
     desc: Create a new driver scaffold
     cmds:
@@ -343,8 +258,7 @@ tasks:
         platforms: [windows]
       - cmd: RUNIX_LOG_SHOW_ORIGIN=true RUNIX_DRIVER_DIR=bin/drivers ./bin/runix run tests/scenarios/ai-driver-comprehensive.feature --driver=ai-driver --driverConfig='{\"model\":\"gpt-4\"}'
         platforms: [darwin, linux]
-      - echo ""
-      - echo "🎉 Quickstart complete! You've seen microservices, web automation, system operations, vision processing, and AI orchestration in action."
+      - echo ""      - echo "🎉 Quickstart complete! You've seen microservices, web automation, system operations, vision processing, and AI orchestration in action."
       - echo "📊 Check runix-report.json for detailed results"
       - echo "📁 Check {{.LOG_DIR}} for execution logs"
       - echo "📸 Screenshots saved in screenshots/ directory"
@@ -463,3 +377,285 @@ tasks:
       - task: fix-firewall
       - echo "🚀 Starting quickstart..."
       - task: quickstart
+  # Testing commands
+  test:
+    desc: Run all tests
+    cmds:
+      - npm test
+
+  test:unit:
+    desc: Run unit tests only
+    cmds:
+      - npm test -- --testPathPattern=tests/unit
+
+  test:integration:
+    desc: Run integration tests only
+    cmds:
+      - npm test -- --testPathPattern=tests/integration
+
+  test:e2e:
+    desc: Run end-to-end tests only
+    cmds:
+      - npm test -- --testPathPattern=tests/e2e
+
+  test:coverage:
+    desc: Run all tests with coverage report
+    cmds:
+      - npm test -- --coverage
+
+  test:watch:
+    desc: Run tests in watch mode
+    cmds:
+      - npm test -- --watch
+
+  test:driver:
+    desc: Test a specific driver
+    cmds:
+      - node scripts/test-driver.js {{.CLI_ARGS}}
+    requires:
+      vars: [CLI_ARGS]
+
+  test:ai-driver:
+    desc: Test AI driver specifically
+    cmds:
+      - npm test -- --testPathPattern=ai
+
+  test:web-driver:
+    desc: Test web driver specifically (requires browser)
+    cmds:
+      - npm test -- --testPathPattern=web
+
+  # Comprehensive test tasks
+  test:
+    desc: "Run all test suites"
+    cmds:
+      - task: test-unit
+      - task: test-integration
+      - task: test-e2e
+      - task: test-coverage
+      - task: test-drivers
+      - task: test-scenarios
+
+  test-unit:
+    desc: "Run unit tests"
+    cmds:
+      - npm test -- --testPathPattern="tests/unit" --verbose
+
+  test-integration:
+    desc: "Run integration tests"
+    cmds:
+      - npm test -- --testPathPattern="tests/integration" --verbose
+
+  test-e2e:
+    desc: "Run end-to-end tests"
+    cmds:
+      - npm test -- --testPathPattern="tests/e2e" --verbose
+
+  test-watch:
+    desc: "Run tests in watch mode"
+    cmds:
+      - npm test -- --watch
+
+  test-coverage:
+    desc: "Run tests with coverage report"
+    cmds:
+      - npm test -- --coverage
+
+  # Driver Testing
+  test-drivers:
+    desc: "Test all drivers"
+    cmds:
+      - task: test-example-driver
+      - task: test-web-driver
+      - task: test-system-driver
+      - task: test-vision-driver
+      - task: test-ai-driver
+
+  test-example-driver:
+    desc: "Test example driver"
+    cmds:
+      - npm test -- --testPathPattern="example.*driver" --verbose
+
+  test-web-driver:
+    desc: "Test web driver"
+    cmds:
+      - npm test -- --testPathPattern="web.*driver" --verbose
+
+  test-system-driver:
+    desc: "Test system driver"
+    cmds:
+      - npm test -- --testPathPattern="system.*driver" --verbose
+
+  test-vision-driver:
+    desc: "Test vision driver"
+    cmds:
+      - npm test -- --testPathPattern="vision.*driver" --verbose
+
+  test-ai-driver:
+    desc: "Test AI driver"
+    cmds:
+      - npm test -- --testPathPattern="ai.*driver" --verbose
+
+  # Feature Testing
+  test-scenarios:
+    desc: "Run all feature scenarios"
+    cmds:
+      - task: test-example-scenarios
+      - task: test-web-scenarios
+      - task: test-comprehensive-scenarios
+
+  test-example-scenarios:
+    desc: "Run example driver scenarios"
+    cmds:
+      - node dist/index.js run tests/scenarios/example-driver.feature --reporter=detailed
+      - node dist/index.js run tests/scenarios/example-driver-comprehensive.feature --reporter=detailed
+
+  test-web-scenarios:
+    desc: "Run web automation scenarios"
+    cmds:
+      - node dist/index.js run tests/scenarios/web-test.feature --reporter=detailed
+      - node dist/index.js run tests/scenarios/web-comprehensive.feature --reporter=detailed
+
+  test-comprehensive-scenarios:
+    desc: "Run comprehensive test scenarios"
+    cmds:
+      - node dist/index.js run tests/scenarios/web-comprehensive-demo.feature --reporter=detailed
+      - node dist/index.js run tests/scenarios/web-showcase.feature --reporter=detailed
+
+  test-showcase:
+    desc: "Run impressive showcase scenarios"
+    cmds:
+      - node dist/index.js run tests/scenarios/web-showcase.feature --tags=@showcase --reporter=detailed
+      - node dist/index.js run tests/scenarios/web-advanced-features.feature --tags=@demo --reporter=detailed
+
+  # Performance Testing
+  test-performance:
+    desc: "Run performance tests"
+    cmds:
+      - npm test -- --testPathPattern="performance" --verbose --testTimeout=60000
+
+  # Continuous Integration Testing
+  test-ci:
+    desc: "Run CI test suite"
+    cmds:
+      - task: build
+      - task: test-unit
+      - task: test-integration
+      - task: test-drivers
+      - task: test-coverage
+
+  # Development Testing
+  test-dev:
+    desc: "Run development test suite (faster)"
+    cmds:
+      - npm test -- --testPathPattern="unit|integration" --verbose --bail
+
+  test-quick:
+    desc: "Run quick smoke tests"
+    cmds:
+      - npm test -- --testPathPattern="unit" --testNamePattern="smoke|basic" --verbose
+
+  # Specific Test Categories
+  test-engine:
+    desc: "Test core engine functionality"
+    cmds:
+      - npm test -- --testPathPattern="engine" --verbose
+
+  test-parser:
+    desc: "Test Gherkin parser"
+    cmds:
+      - npm test -- --testPathPattern="parser" --verbose
+
+  test-registry:
+    desc: "Test driver registry"
+    cmds:
+      - npm test -- --testPathPattern="registry" --verbose
+
+  # Debugging Tests
+  test-debug:
+    desc: "Run tests with debugging enabled"
+    cmds:
+      - npm test -- --verbose --detectOpenHandles --forceExit
+
+  test-specific:
+    desc: "Run specific test file (use: task test-specific TEST_FILE=path/to/test.js)"
+    cmds:
+      - npm test -- {{.TEST_FILE}} --verbose
+
+  # Clean and Reset
+  clean-tests:
+    desc: "Clean test artifacts"
+    cmds:
+      - rm -rf coverage/
+      - rm -rf test-results/
+      - rm -rf screenshots/
+      - rm -rf reports/
+      - rm -rf logs/test-*.log
+
+  # Setup Test Environment
+  setup-test-env:
+    desc: "Setup test environment"
+    cmds:
+      - mkdir -p logs
+      - mkdir -p reports
+      - mkdir -p screenshots
+      - mkdir -p test-results
+
+  # Run Tests with Different Configurations
+  test-headless:
+    desc: "Run web tests in headless mode"
+    env:
+      HEADLESS: "true"
+    cmds:
+      - task: test-web-scenarios
+  test-ui:
+    desc: "Run web tests with visible browser"
+    env:
+      HEADLESS: "false"
+    cmds:
+      - task: test-web-scenarios
+
+  # Utility Tasks
+  validate:
+    desc: "Validate project setup"
+    cmds:
+      - node dist/index.js validate
+
+  lint:
+    desc: "Run linter"
+    cmds:
+      - npm run lint
+
+  format:
+    desc: "Format code"
+    cmds:
+      - npm run format
+
+  # Documentation Tasks
+  docs:
+    desc: "Generate documentation"
+    cmds:
+      - npm run docs
+  help:
+    desc: "Show detailed help"
+    cmds:
+      - echo "Runix Task Runner"
+      - echo "================"
+      - echo ""
+      - echo "Main Tasks:"
+      - echo "  install       - Install all dependencies"
+      - echo "  build         - Build project and drivers"
+      - echo "  test          - Run all tests"
+      - echo "  test-ci       - Run CI test suite"
+      - echo ""
+      - echo "Development:"
+      - echo "  test-dev      - Quick development tests"
+      - echo "  test-watch    - Watch mode testing"
+      - echo "  dev           - Development mode"
+      - echo ""
+      - echo "Specific Testing:"
+      - echo "  test-drivers  - Test all drivers"
+      - echo "  test-scenarios- Run feature scenarios"
+      - echo "  test-showcase - Run demo scenarios"
+      - echo ""
+      - echo "Use 'task --list' for all available tasks"

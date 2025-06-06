@@ -1,84 +1,62 @@
-export interface ErrorContext {
-  operation?: string;
-  driverId?: string;
-  stepText?: string;
-  featurePath?: string;
-  traceId?: string;
-  timestamp?: string;
-  stackTrace?: string;
-  port?: number;
-  additionalData?: Record<string, any>;
-}
+export abstract class RunixError extends Error {
+  abstract readonly type: string;
+  readonly context: any;
+  readonly cause?: Error;
 
-export class RunixError extends Error {
-  public readonly context: ErrorContext;
-  public readonly originalError?: Error;
-  public readonly errorCode: string;
-
-  constructor(message: string, errorCode: string, context: ErrorContext = {}, originalError?: Error) {
+  constructor(message: string, context: any = {}, cause?: Error) {
     super(message);
     this.name = this.constructor.name;
-    this.errorCode = errorCode;
-    this.context = {
-      ...context,
-      timestamp: new Date().toISOString(),
-      stackTrace: this.stack
-    };
-    this.originalError = originalError;
-
-    // Maintain proper error chain
-    if (originalError && originalError.stack) {
-      this.stack = `${this.stack}\nCaused by: ${originalError.stack}`;
-    }
-  }
-
-  public toJSON(): Record<string, any> {
-    return {
-      name: this.name,
-      message: this.message,
-      errorCode: this.errorCode,
-      context: this.context,
-      originalError: this.originalError ? {
-        name: this.originalError.name,
-        message: this.originalError.message,
-        stack: this.originalError.stack
-      } : undefined
-    };
+    this.context = context;
+    this.cause = cause;
   }
 }
 
-export class DriverError extends RunixError {
-  constructor(message: string, driverId: string, context: ErrorContext = {}, originalError?: Error) {
-    super(message, 'DRIVER_ERROR', { ...context, driverId }, originalError);
+export abstract class DriverError extends RunixError {
+  abstract readonly type: string;
+  readonly driverId: string;
+
+  constructor(message: string, driverId: string, context: any = {}, cause?: Error) {
+    super(message, context, cause);
+    this.driverId = driverId;
   }
 }
 
 export class DriverStartupError extends DriverError {
-  constructor(driverId: string, context: ErrorContext = {}, originalError?: Error) {
-    super(`Failed to start driver: ${driverId}`, driverId, { ...context, operation: 'driver_startup' }, originalError);
+  readonly type = 'DRIVER_STARTUP_ERROR' as const;
+
+  constructor(driverId: string, context: any = {}, cause?: Error) {
+    super(`Failed to start driver: ${driverId}`, driverId, context, cause);
   }
 }
 
 export class DriverCommunicationError extends DriverError {
-  constructor(driverId: string, operation: string, context: ErrorContext = {}, originalError?: Error) {
-    super(`Driver communication failed: ${operation}`, driverId, { ...context, operation }, originalError);
+  readonly type = 'DRIVER_COMMUNICATION_ERROR' as const;
+
+  constructor(driverId: string, operation: string, context: any = {}, cause?: Error) {
+    super(`Driver communication failed for ${driverId} during ${operation}`, driverId, context, cause);
   }
 }
 
 export class StepExecutionError extends RunixError {
-  constructor(stepText: string, context: ErrorContext = {}, originalError?: Error) {
-    super(`Step execution failed: ${stepText}`, 'STEP_EXECUTION_ERROR', { ...context, stepText, operation: 'step_execution' }, originalError);
-  }
-}
+  readonly type = 'STEP_EXECUTION_ERROR';
 
-export class FeatureParsingError extends RunixError {
-  constructor(featurePath: string, context: ErrorContext = {}, originalError?: Error) {
-    super(`Failed to parse feature file: ${featurePath}`, 'FEATURE_PARSING_ERROR', { ...context, featurePath, operation: 'feature_parsing' }, originalError);
+  constructor(message: string, context: any = {}, cause?: Error) {
+    super(message, context, cause);
   }
 }
 
 export class ConfigurationError extends RunixError {
-  constructor(message: string, context: ErrorContext = {}, originalError?: Error) {
-    super(message, 'CONFIGURATION_ERROR', { ...context, operation: 'configuration' }, originalError);
+  readonly type = 'CONFIGURATION_ERROR';
+
+  constructor(message: string, context: any = {}, cause?: Error) {
+    super(message, context, cause);
+  }
+}
+
+export class FeatureParsingError extends RunixError {
+  readonly type = 'FEATURE_PARSING_ERROR';
+
+  constructor(message: string, context: any = {}, cause?: Error) {
+    super(message, context, cause);
   }
 }

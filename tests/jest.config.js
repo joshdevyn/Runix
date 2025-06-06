@@ -1,17 +1,30 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  testMatch: ['**/tests/**/*.test.ts'],
+  rootDir: '../',
+  testMatch: [
+    '<rootDir>/tests/**/*.test.ts',
+    '<rootDir>/tests/**/*.test.js'
+  ],
   collectCoverageFrom: [
-    'src/**/*.ts',
+    'src/**/*.{ts,js}',
+    'drivers/**/*.{ts,js}',
     '!src/**/*.d.ts',
-    '!**/node_modules/**',
-    '!**/dist/**'
+    '!**/node_modules/**'
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
-  testPathIgnorePatterns: ['/node_modules/', '/dist/'],
-  verbose: true,
-  testTimeout: 30000,  // Increased timeout for driver tests
-  setupFilesAfterEnv: ['./tests/setup.ts']
+  setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
+  testTimeout: 30000,
+  moduleNameMapping: {
+    '^@/(.*)$': '<rootDir>/src/$1',
+    '^@drivers/(.*)$': '<rootDir>/drivers/$1'
+  },
+  transform: {
+    '^.+\\.ts$': 'ts-jest',
+    '^.+\\.js$': 'babel-jest'
+  },
+  transformIgnorePatterns: [
+    'node_modules/(?!(ws|playwright)/)'
+  ]
 };

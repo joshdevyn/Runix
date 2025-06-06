@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-06-06T21:47:16.796Z",
+  "results": [
+    {
+      "success": false,
+      "step": "the service is running on port 3001",
+      "error": {},
+      "timestamp": "2025-06-06T21:47:19.305Z"
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "failed": 1,
+    "duration": 2513
+  }
+}

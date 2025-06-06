@@ -1,25 +1,33 @@
 {
   "name": "runix-web-driver",
   "version": "1.0.0",
-  "description": "Playwright-based web driver for Runix automation engine",
-  "main": "index.js",
+  "description": "Professional web driver for Runix automation engine with Selenium WebDriver",
+  "main": "src/index.ts",
   "scripts": {
-    "start": "node index.js",
-    "build": "node build.js",
-    "test": "node index.js --port=9001"
+    "start": "node dist/index.js",
+    "build": "tsc && node build.js",
+    "dev": "ts-node src/index.ts",
+    "test": "ts-node src/index.ts --port=8000",
+    "compile": "tsc"
   },
   "dependencies": {
-    "playwright": "^1.40.0",
-    "ws": "^8.14.0"
+    "dotenv": "^16.3.1",
+    "selenium-webdriver": "^4.15.0",
+    "ws": "^8.18.2"
   },
   "devDependencies": {
-    "pkg": "^5.8.1"
+    "@types/node": "^20.8.0",
+    "@types/selenium-webdriver": "^4.1.17",
+    "@types/ws": "^8.5.8",
+    "pkg": "^5.8.1",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.2.2"
   },
   "pkg": {
     "targets": [
       "node18-win-x64"
     ],
-    "outputPath": "."
+    "outputPath": "dist"
   },
   "author": "Runix Team",
   "license": "MIT"

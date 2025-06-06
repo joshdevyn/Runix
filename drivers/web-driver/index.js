@@ -46,7 +46,7 @@ let context = null;
 let config = {
   browserType: 'chromium',
   headless: true,
-  timeout: 30000,
+  timeout: 60000, // Increased from 30s to 60s
   screenshotDir: 'screenshots'
 };
 
@@ -363,12 +363,37 @@ async function handleExecute(id, action, args) {
         }
         
       case 'open':
-        await page.goto(args[0]);
-        const title = await page.title();
-        return sendSuccessResponse(id, { 
-          url: args[0], 
-          title: title 
-        });
+        try {
+          // Add retry logic for navigation
+          let retries = 3;
+          let lastError;
+          
+          while (retries > 0) {
+            try {
+              await page.goto(args[0], { 
+                waitUntil: 'domcontentloaded',
+                timeout: config.timeout 
+              });
+              const title = await page.title();
+              return sendSuccessResponse(id, { 
+                url: args[0], 
+                title: title 
+              });
+            } catch (err) {
+              lastError = err;
+              retries--;
+              if (retries > 0) {
+                logger.log(`Navigation failed, retrying... (${retries} attempts remaining)`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              }
+            }
+          }
+          
+          throw new Error(`Navigation failed after retries: ${lastError.message}`);
+        } catch (err) {
+          logger.error(`Navigation to ${args[0]} failed:`, err);
+          return sendErrorResponse(id, 500, `Failed to navigate to ${args[0]}: ${err.message}`);
+        }
         
       case 'click':
         await page.click(args[0]);

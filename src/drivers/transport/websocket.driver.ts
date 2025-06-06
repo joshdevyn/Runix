@@ -9,14 +9,25 @@ export class WebSocketDriverInstance {
   private metadata: DriverMetadata;
   private port: number;
   private connected = false;
+  private pendingRequests = new Map<string, any>();
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 3;
+  private defaultTimeout = 60000; // Increased from 30s to 60s
+  private capabilities: any = null; // Store capabilities after startup
 
-  constructor(metadata: DriverMetadata, port: number) {
-    this.metadata = metadata;
+  constructor(metadata: DriverMetadata, port: number) {    this.metadata = metadata;
     this.port = port;
-    this.log = Logger.getInstance().createChildLogger({
-      component: 'WebSocketDriver',
-      driverId: metadata.id
-    });
+    const loggerInstance = Logger.getInstance();
+    // Safety check for createChildLogger method during cleanup
+    if (typeof loggerInstance.createChildLogger === 'function') {
+      this.log = loggerInstance.createChildLogger({
+        component: 'WebSocketDriver',
+        driverId: metadata.id
+      });
+    } else {
+      // Fallback to main logger instance if createChildLogger is not available
+      this.log = loggerInstance;
+    }
   }
 
   async start(): Promise<any> {
@@ -49,11 +60,12 @@ export class WebSocketDriverInstance {
           this.log.error('WebSocket connection error', { traceId, url, port: this.port }, error);
           reject(new Error(`Failed to connect to driver at ${url}: ${error.message}`));
         });
-      });
-
-      // Get capabilities using the correct JSON-RPC method call
+      });      // Get capabilities using the correct JSON-RPC method call
       const capabilities = await this.callMethod('capabilities', {});
       this.log.info('Driver capabilities received', { traceId, port: this.port }, capabilities);
+      
+      // Store capabilities for later retrieval
+      this.capabilities = capabilities;
       
       return capabilities;
 
@@ -87,6 +99,26 @@ export class WebSocketDriverInstance {
     return this.callMethod('execute', { action, args });
   }
 
+  async introspect(type?: string): Promise<any> {
+    if (!this.connected || !this.ws) {
+      throw new DriverCommunicationError(this.metadata.id, 'introspect', {
+        port: this.port
+      });
+    }
+
+    return this.callMethod('introspect', { type: type || 'steps' });
+  }
+
+  /**
+   * Get driver capabilities (cached from startup)
+   */
+  async getCapabilities(): Promise<any> {
+    if (!this.capabilities) {
+      throw new Error('Driver capabilities not available. Driver may not be started yet.');
+    }
+    return this.capabilities;
+  }
+
   /**
    * Call a JSON-RPC method on the driver
    */
@@ -106,15 +138,16 @@ export class WebSocketDriverInstance {
         params: params
       };
 
-      const timeout = setTimeout(() => {
-        reject(new Error(`Request timeout for method: ${method}`));
-      }, 30000);
+      // Set up timeout with longer duration for web operations
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`Request timeout for method: ${method}. Consider increasing timeout for slow-loading pages.`));
+      }, this.defaultTimeout);
 
       const messageHandler = (data: WebSocket.Data) => {
         try {
           const response = JSON.parse(data.toString());
           if (response.id === requestId) {
-            clearTimeout(timeout);
+            clearTimeout(timeoutId);
             if (this.ws) {
               this.ws.off('message', messageHandler);
             }
@@ -136,7 +169,7 @@ export class WebSocketDriverInstance {
         this.ws.on('message', messageHandler);
         this.ws.send(JSON.stringify(message));
       } else {
-        clearTimeout(timeout);
+        clearTimeout(timeoutId);
         reject(new Error('WebSocket connection is null'));
       }
     });
@@ -159,5 +192,57 @@ export class WebSocketDriverInstance {
 
   async shutdown(): Promise<void> {
     return this.stop();
+  }
+
+  private handleResponse(response: any): void {
+    const { id } = response;
+    const pending = this.pendingRequests.get(id);
+    
+    if (pending) {
+      clearTimeout(pending.timeoutId);
+      this.pendingRequests.delete(id);
+      
+      if (response.error) {
+        pending.reject(new Error(response.error.message || 'Unknown error'));
+      } else {
+        pending.resolve(response.result);
+      }
+    }
+  }
+  
+  private handleDisconnection(): void {
+    // Reject all pending requests
+    for (const [id, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeoutId);
+      pending.reject(new Error('WebSocket disconnected'));
+    }
+    this.pendingRequests.clear();
+    
+    // Attempt reconnection if needed
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      setTimeout(() => this.attemptReconnect(), 1000 * this.reconnectAttempts);
+    }
+  }
+  
+  private async attemptReconnect(): Promise<void> {
+    // Implementation would depend on stored connection URL
+    // Note: Reconnection functionality would need to be implemented
+    // this.emit('reconnecting', this.reconnectAttempts);
+    this.log.debug('Attempting reconnection', { 
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts 
+    });
+  }
+  
+  private generateRequestId(): string {
+    return Math.random().toString(36).substring(2, 15);
+  }
+  
+  async disconnect(): Promise<void> {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
   }
 }

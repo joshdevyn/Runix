@@ -27,8 +27,29 @@ export interface LoggerConfig {
   context?: LogContext;
 }
 
+// Global registry to handle module reloading in Jest environment
+interface GlobalLoggerRegistry {
+  loggerInstance?: Logger;
+}
+
+declare global {
+  var __RUNIX_LOGGER_REGISTRY__: GlobalLoggerRegistry | undefined;
+}
+
+const globalRegistry = (() => {
+  if (typeof globalThis !== 'undefined') {
+    if (!globalThis.__RUNIX_LOGGER_REGISTRY__) {
+      globalThis.__RUNIX_LOGGER_REGISTRY__ = {};
+    }
+    return globalThis.__RUNIX_LOGGER_REGISTRY__;
+  }
+  return {} as GlobalLoggerRegistry;
+})();
+
 export class Logger {
   private static instance: Logger;
+  private static instanceCount = 0;
+  private instanceId: number;
   private level: LogLevel = LogLevel.INFO;
   private filePath?: string;
   private consoleEnabled: boolean = true;
@@ -37,6 +58,7 @@ export class Logger {
   private traceStack: Map<string, { start: number; context: LogContext }> = new Map();
 
   private constructor(config: LoggerConfig = {}) {
+    this.instanceId = ++Logger.instanceCount;
     this.level = config.level ?? LogLevel.INFO;
     this.filePath = config.filePath;
     this.consoleEnabled = config.console ?? true;
@@ -49,12 +71,23 @@ export class Logger {
   }
 
   public static getInstance(config?: LoggerConfig): Logger {
-    if (!Logger.instance) {
+    // Try to get instance from global registry first (for Jest environment)
+    if (globalRegistry.loggerInstance && typeof globalRegistry.loggerInstance.createChildLogger === 'function') {
+      if (config) {
+        globalRegistry.loggerInstance.updateConfig(config);
+      }
+      return globalRegistry.loggerInstance;
+    }
+
+    // Fallback to static instance
+    if (!Logger.instance || typeof Logger.instance.createChildLogger !== 'function') {
       Logger.instance = new Logger(config);
+      // Store in global registry
+      globalRegistry.loggerInstance = Logger.instance;
     } else if (config) {
-      // Update existing instance with new config
       Logger.instance.updateConfig(config);
     }
+    
     return Logger.instance;
   }
 

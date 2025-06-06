@@ -1,0 +1,27 @@
+{
+  "name": "vision-driver",
+  "version": "1.0.0",
+  "description": "Computer vision driver for OCR and UI element detection",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "build": "node build.js",
+    "test": "echo \"Vision driver test not implemented\" && exit 0"
+  },
+  "keywords": ["runix", "driver", "vision", "ocr", "automation"],
+  "author": "Runix Team",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  },
+  "optionalDependencies": {
+    "tesseract.js": "^4.1.1"
+  },
+  "pkg": {
+    "assets": ["driver.json", "**/*.js"],
+    "targets": ["node18-win-x64"]
+  }
+}

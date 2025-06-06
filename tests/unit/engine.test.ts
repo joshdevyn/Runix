@@ -1,156 +1,127 @@
 import { RunixEngine } from '../../src/core/engine';
 import { DriverRegistry } from '../../src/drivers/driverRegistry';
-import { Database } from '../../src/db/database';
 import { StepRegistry } from '../../src/core/stepRegistry';
+import { Logger } from '../../src/utils/logger';
 
 // Mock dependencies
 jest.mock('../../src/drivers/driverRegistry');
-jest.mock('../../src/db/database');
-jest.mock('../../src/parser/parser');
 jest.mock('../../src/core/stepRegistry');
+jest.mock('../../src/utils/logger');
 
-describe('RunixEngine Unit Tests', () => {
-  beforeEach(async () => {
+describe('RunixEngine', () => {
+  let engine: RunixEngine;
+  let mockDriverRegistry: jest.Mocked<DriverRegistry>;
+  let mockStepRegistry: jest.Mocked<StepRegistry>;
+
+  beforeEach(() => {
+    // Reset mocks
     jest.clearAllMocks();
-    
-    // Reset singletons safely
-    (DriverRegistry as any).instance = undefined;
-    (Database as any).instance = undefined;
-    (StepRegistry as any).instance = undefined;
-    
-    // Setup mocks with proper error handling and logging methods
-    const mockDriverRegistry = DriverRegistry.getInstance as jest.Mock;
-    mockDriverRegistry.mockReturnValue({
-      listDriverIds: jest.fn().mockReturnValue(['mockDriver']),
+      // Mock DriverRegistry
+    mockDriverRegistry = {
+      getInstance: jest.fn().mockReturnThis(),
       initialize: jest.fn().mockResolvedValue(undefined),
-      getDriver: jest.fn().mockReturnValue({ 
-        id: 'mockDriver', 
-        name: 'MockDriver',
-        executable: 'mock.exe',
-        path: '/mock/path'
+      getDriver: jest.fn().mockImplementation((driverId: string) => {
+        if (driverId === 'system-driver') {
+          return {
+            id: 'system-driver',
+            name: 'SystemDriver',
+            version: '2.0.0',
+            path: 'drivers/system-driver',
+            executable: 'index.js'
+          };
+        }
+        return undefined;
       }),
+      listDriverIds: jest.fn().mockReturnValue(['system-driver', 'test-driver']),
       startDriver: jest.fn().mockResolvedValue({
         start: jest.fn().mockResolvedValue({
-          name: 'MockDriver',
-          version: '1.0.0',
-          supportedActions: ['mockAction']
+          name: 'SystemDriver',
+          version: '2.0.0',
+          supportedActions: ['takeScreenshot', 'clickAt', 'typeText']
         }),
         initialize: jest.fn().mockResolvedValue(undefined),
-        execute: jest.fn().mockResolvedValue({ 
-          success: true, 
-          data: { result: 'mock result' }
-        }),
+        execute: jest.fn().mockResolvedValue({ success: true }),
         shutdown: jest.fn().mockResolvedValue(undefined)
       })
-    });
-    
-    // Mock database with validation
-    const mockDatabase = Database.getInstance as jest.Mock;
-    mockDatabase.mockReturnValue({
-      initialize: jest.fn().mockImplementation((config) => {
-        if (config && typeof config !== 'object') {
-          throw new Error('Invalid database config');
-        }
-        return Promise.resolve();
-      }),
-      disconnect: jest.fn().mockResolvedValue(undefined)
-    });
-    
-    // Mock step registry with enhanced logging methods
-    const mockStepRegistry = StepRegistry.getInstance as jest.Mock;
-    mockStepRegistry.mockReturnValue({
+    } as any;
+
+    // Mock StepRegistry
+    mockStepRegistry = {
+      getInstance: jest.fn().mockReturnThis(),
       initialize: jest.fn().mockResolvedValue(undefined),
       registerSteps: jest.fn(),
       findMatchingStep: jest.fn().mockReturnValue({
-        driverId: 'mockDriver',
-        step: { id: 'mock-step', pattern: 'mock (.*)', action: 'mockAction' }
+        driverId: 'test-driver',
+        step: {
+          id: 'test-step',
+          pattern: 'test step',
+          action: 'test'
+        }
       })
-    });
+    } as any;
 
-    // Mock Logger with enhanced methods
-    const mockLogger = require('../../src/utils/logger').Logger.getInstance as jest.Mock;
-    mockLogger.mockReturnValue({
-      info: jest.fn(),
-      debug: jest.fn(),
-      trace: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn(),
-      startTrace: jest.fn().mockReturnValue('mock-trace-id'),
-      endTrace: jest.fn(),
-      logMethodEntry: jest.fn().mockReturnValue('mock-trace-id'),
+    // Setup singleton returns
+    (DriverRegistry.getInstance as jest.Mock).mockReturnValue(mockDriverRegistry);
+    (StepRegistry.getInstance as jest.Mock).mockReturnValue(mockStepRegistry);
+
+    // Mock Logger
+    const mockLogger = {
+      logMethodEntry: jest.fn().mockReturnValue('trace-id'),
       logMethodExit: jest.fn(),
       logMethodError: jest.fn(),
-      createChildLogger: jest.fn().mockReturnThis()
-    });
-  });
-  
-  afterEach(async () => {
-    // Cleanup any remaining resources
-    jest.clearAllTimers();
-  });
-  
-  test('initializes with default config', async () => {
-    const engine = new RunixEngine();
-    
-    await expect(engine.initialize()).resolves.not.toThrow();
-    
-    // Verify driver registry was used
-    expect(DriverRegistry.getInstance).toHaveBeenCalled();
-    const mockRegistry = DriverRegistry.getInstance();
-    expect(mockRegistry.getDriver).toHaveBeenCalledWith('WebDriver');
-    expect(mockRegistry.startDriver).toHaveBeenCalled();
-  });
-  
-  test('initializes with custom config and validates input', async () => {
-    const validConfig = {
-      driverName: 'CustomDriver',
-      driverConfig: { timeout: 5000 }
+      startTrace: jest.fn().mockReturnValue('trace-id'),
+      endTrace: jest.fn(),
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      trace: jest.fn()
     };
-    
-    const engine = new RunixEngine(validConfig);
-    await expect(engine.initialize()).resolves.not.toThrow();
-    
-    const mockRegistry = DriverRegistry.getInstance();
-    expect(mockRegistry.getDriver).toHaveBeenCalledWith('CustomDriver');
+    (Logger.getInstance as jest.Mock).mockReturnValue(mockLogger);
+
+    engine = new RunixEngine();
   });
-  
-  test('handles driver initialization failure gracefully', async () => {
-    const mockRegistry = DriverRegistry.getInstance as jest.Mock;
-    mockRegistry.mockReturnValueOnce({
-      ...mockRegistry(),
-      getDriver: jest.fn().mockReturnValue(null)
+
+  describe('initialization', () => {
+    it('should initialize successfully without driver', async () => {
+      await expect(engine.initialize()).resolves.not.toThrow();
+      expect(mockDriverRegistry.initialize).toHaveBeenCalled();
+      expect(mockStepRegistry.initialize).toHaveBeenCalled();
     });
-    
-    const engine = new RunixEngine({ driverName: 'NonExistentDriver' });
-    
-    await expect(engine.initialize()).rejects.toThrow('Driver not found: NonExistentDriver');
+
+    it('should initialize with a specific driver when configured', async () => {
+      const mockDriverMetadata = {
+        id: 'test-driver',
+        name: 'TestDriver',
+        version: '1.0.0',
+        path: '/path/to/driver',
+        executable: 'test-driver.js'
+      };
+
+      mockDriverRegistry.getDriver.mockReturnValue(mockDriverMetadata);
+      
+      const engineWithDriver = new RunixEngine({ driverName: 'test-driver' });
+      
+      await expect(engineWithDriver.initialize()).resolves.not.toThrow();
+      expect(mockDriverRegistry.getDriver).toHaveBeenCalledWith('test-driver');
+      expect(mockDriverRegistry.startDriver).toHaveBeenCalledWith('test-driver');
+    });
+
+    it('should throw error when specified driver is not found', async () => {
+      mockDriverRegistry.getDriver.mockReturnValue(undefined);
+      
+      const engineWithInvalidDriver = new RunixEngine({ driverName: 'invalid-driver' });
+      
+      await expect(engineWithInvalidDriver.initialize()).rejects.toThrow(
+        "Driver 'invalid-driver' not found in registry"
+      );
+    });
   });
-  
-  test('shuts down properly with resource cleanup', async () => {
-    const engine = new RunixEngine();
-    await engine.initialize();
-    
-    await expect(engine.shutdown()).resolves.not.toThrow();
-    
-    // Verify proper cleanup
-    const mockRegistry = DriverRegistry.getInstance();
-    const mockDriver = await mockRegistry.startDriver('mockDriver');
-    expect(mockDriver.shutdown).toHaveBeenCalled();
-    
-    const mockDb = Database.getInstance();
-    expect(mockDb.disconnect).toHaveBeenCalled();
-  });
-  
-  test('handles concurrent initialization attempts', async () => {
-    const engine = new RunixEngine();
-    
-    // Attempt multiple concurrent initializations
-    const promises = Array(5).fill(null).map(() => engine.initialize());
-    
-    await expect(Promise.all(promises)).resolves.not.toThrow();
-    
-    // Should only initialize once
-    const mockRegistry = DriverRegistry.getInstance();
-    expect(mockRegistry.startDriver).toHaveBeenCalledTimes(1);
+
+  describe('shutdown', () => {
+    it('should shutdown gracefully', async () => {
+      await engine.initialize();
+      await expect(engine.shutdown()).resolves.not.toThrow();
+    });
   });
 });

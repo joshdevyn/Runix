@@ -1,5 +1,5 @@
 import { parseFeatureFile } from '../parser/parser';
-import { DriverRegistry } from '../drivers/driverRegistry';
+import { DriverRegistry, StepDefinition } from '../drivers/driverRegistry';
 import { Logger, LogLevel } from '../utils/logger';
 import { env } from '../utils/env';
 import { ResultLogger } from '../report/resultLogger';
@@ -7,11 +7,14 @@ import { StepResult } from '../report/resultLogger';
 import { Database } from '../db/database';
 import { Tag, Feature, FeatureChild } from '@cucumber/messages';
 import { StepRegistry } from './stepRegistry';
-import { RunixError, DriverError, StepExecutionError, FeatureParsingError, ConfigurationError } from '../utils/errors';
+import { RunixError, DriverError, StepExecutionError, FeatureParsingError, ConfigurationError, DriverStartupError } from '../utils/errors';
+import { AIOrchestrator } from './aiOrchestrator';
+import { PluginManager } from './pluginManager';
 
 interface EngineConfig {
   driverName?: string;
   driverConfig?: any;
+  autoLoadDrivers?: boolean;
   tags?: string[];
   databaseConfig?: any;
   reportPath?: string;
@@ -22,7 +25,8 @@ interface EngineConfig {
 
 const DEFAULT_CONFIG: EngineConfig = {
   // Get values from environment variables or use defaults
-  driverName: env.get('DRIVER', 'WebDriver') || 'WebDriver',
+  driverName: env.get('DRIVER') || undefined, // No default driver
+  autoLoadDrivers: env.getBoolean('AUTO_LOAD_DRIVERS', true) || true,
   tags: env.get('TAGS')?.split(',') || [],
   parallelScenarios: env.getBoolean('PARALLEL_SCENARIOS', false) || false,
   reportPath: env.get('REPORT_PATH', 'runix-report.json') || 'runix-report.json',
@@ -51,16 +55,23 @@ export class RunixEngine {
   private config: EngineConfig;
   private initialized = false;
   private executionId: string;
+  private driverRegistry: DriverRegistry; // Add missing property
+  private aiOrchestrator: AIOrchestrator | null = null;
+  private stepRegistry: StepRegistry;
+  private pluginManager: PluginManager;
 
   // Add constants for better maintainability
   private static readonly DEFAULT_DRIVER_TIMEOUT = 30000;
   private static readonly MAX_PARALLEL_SCENARIOS = 10;
   private static readonly DRIVER_STARTUP_TIMEOUT = 5000;
-
   constructor(config: Partial<EngineConfig> = {}) {
     // First load .env configs, then override with passed config
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.logger = new ResultLogger();
+      // Initialize core components
+    this.driverRegistry = DriverRegistry.getInstance();
+    this.stepRegistry = StepRegistry.getInstance();
+    this.pluginManager = PluginManager.getInstance();
     
     // Try to get logFilePath from ENV if not specified in config
     if (!this.config.logFilePath) {
@@ -165,11 +176,28 @@ export class RunixEngine {
         throw new ConfigurationError('Step registry initialization failed', { 
           operation: 'step_registry_init',
           traceId 
-        }, stepError instanceof Error ? stepError : new Error(String(stepError)));
-      } finally {
+        }, stepError instanceof Error ? stepError : new Error(String(stepError)));      } finally {
         this.log.endTrace(stepRegistryTraceId);
       }
-      
+
+      // Initialize plugin manager
+      const pluginManagerTraceId = this.log.startTrace('plugin-manager-initialization');
+      try {
+        this.log.debug('Initializing plugin manager', { traceId, pluginManagerTraceId });
+        await this.pluginManager.initialize();
+        const pluginHealth = this.pluginManager.getPluginHealth();
+        this.log.info('Plugin manager initialized successfully', { 
+          traceId, 
+          pluginManagerTraceId 
+        }, pluginHealth);
+      } catch (pluginError) {
+        this.log.error('Plugin manager initialization failed', { traceId, pluginManagerTraceId }, pluginError);
+        // Continue without plugins - this is not a critical failure
+        this.log.warn('Continuing without plugin support', { traceId });
+      } finally {
+        this.log.endTrace(pluginManagerTraceId);
+      }
+
       // Initialize driver registry
       const driverRegistryTraceId = this.log.startTrace('driver-registry-initialization');
       try {
@@ -185,17 +213,90 @@ export class RunixEngine {
           discoveredDriverCount: discoveredDrivers.length,
           discoveredDrivers 
         });
+
+        // Auto-load all drivers and register their steps if enabled
+        if (this.config.autoLoadDrivers && discoveredDrivers.length > 0) {
+          this.log.info('Auto-loading all available drivers and registering steps', {
+            traceId,
+            driverCount: discoveredDrivers.length,
+            drivers: discoveredDrivers
+          });
+
+          const stepRegistry = StepRegistry.getInstance();
+          let totalStepsRegistered = 0;
+          const driverLoadResults: Array<{driver: string, status: 'success' | 'failed', stepCount?: number, error?: string}> = [];
+
+          for (const driverId of discoveredDrivers) {
+            const autoLoadTraceId = this.log.startTrace('auto-load-driver', { driverId });
+            try {
+              this.log.debug(`Auto-loading driver: ${driverId}`, { traceId, autoLoadTraceId, driverId });
+              
+              // Get driver steps through introspection without initializing the driver process
+              const steps = await this.loadDriverSteps(driverId);
+              
+              if (steps && steps.length > 0) {
+                stepRegistry.registerSteps(driverId, steps);
+                totalStepsRegistered += steps.length;
+                driverLoadResults.push({ driver: driverId, status: 'success', stepCount: steps.length });
+                
+                this.log.info(`Registered ${steps.length} steps for driver: ${driverId}`, {
+                  traceId, autoLoadTraceId, driverId, stepCount: steps.length
+                });
+              } else {
+                driverLoadResults.push({ driver: driverId, status: 'failed', error: 'No steps found' });
+                this.log.warn(`No steps found for driver: ${driverId}`, { traceId, autoLoadTraceId, driverId });
+              }
+              
+            } catch (error) {
+              const errorMsg = error instanceof Error ? error.message : String(error);
+              driverLoadResults.push({ driver: driverId, status: 'failed', error: errorMsg });
+              this.log.warn(`Failed to load steps for driver: ${driverId}`, { 
+                traceId, autoLoadTraceId, driverId, error: errorMsg 
+              });
+            } finally {
+              this.log.endTrace(autoLoadTraceId);
+            }
+          }
+
+          // Log summary of driver loading
+          const successfulDrivers = driverLoadResults.filter(r => r.status === 'success');
+          const failedDrivers = driverLoadResults.filter(r => r.status === 'failed');
+          
+          this.log.info('Driver auto-loading completed', {
+            traceId,
+            totalDrivers: discoveredDrivers.length,
+            successful: successfulDrivers.length,
+            failed: failedDrivers.length,
+            totalStepsRegistered,
+            results: driverLoadResults
+          });
+
+          if (failedDrivers.length > 0) {
+            this.log.warn('Some drivers failed to load', {
+              traceId,
+              failedDrivers: failedDrivers.map(d => ({ driver: d.driver, error: d.error }))
+            });
+          }
+
+          // Validate that we have at least some steps available
+          if (totalStepsRegistered === 0) {
+            throw new ConfigurationError('No step definitions loaded from any driver', {
+              operation: 'auto_load_drivers',
+              traceId,
+              discoveredDrivers,
+              driverLoadResults
+            });
+          }
+        }
+        
       } catch (driverRegistryError) {
         this.log.error('Driver registry initialization failed', { traceId, driverRegistryTraceId }, driverRegistryError);
-        throw new ConfigurationError('Driver registry initialization failed', { 
-          operation: 'driver_registry_init',
-          traceId 
-        }, driverRegistryError instanceof Error ? driverRegistryError : new Error(String(driverRegistryError)));
+        throw new Error(`Driver registry initialization failed: ${driverRegistryError instanceof Error ? driverRegistryError.message : String(driverRegistryError)}`);
       } finally {
         this.log.endTrace(driverRegistryTraceId);
       }
       
-      // If a default driver is specified, initialize it
+      // If a default driver is specified, initialize it (for backwards compatibility)
       if (this.config.driverName) {
         const defaultDriverTraceId = this.log.startTrace('default-driver-initialization');
         try {
@@ -205,25 +306,58 @@ export class RunixEngine {
             driverName: this.config.driverName 
           });
           
-          const defaultDriver = await this.initializeDriver(this.config.driverName);
-          if (defaultDriver) {
-            this.drivers.set(this.config.driverName.toLowerCase(), defaultDriver);
-            this.log.info('Default driver initialized successfully', { 
-              traceId, 
-              defaultDriverTraceId,
-              driverName: this.config.driverName 
-            });
+          // Validate driver exists before attempting initialization
+          const driverMetadata = this.driverRegistry.getDriver(this.config.driverName);
+          if (!driverMetadata) {
+            throw new Error(`Driver '${this.config.driverName}' not found in registry`);
           }
+          
+          this.log.debug('Driver metadata found', { 
+            traceId, 
+            defaultDriverTraceId,
+            driverMeta: driverMetadata 
+          });
+          
+          const defaultDriver = await this.initializeDriver(this.config.driverName);
+          
+          this.log.info('Default driver initialized successfully', {
+            traceId,
+            defaultDriverTraceId,
+            driverName: this.config.driverName
+          });
         } catch (defaultDriverError) {
           this.log.error('Default driver initialization failed', { 
             traceId, 
             defaultDriverTraceId,
             driverName: this.config.driverName 
           }, defaultDriverError);
-          throw defaultDriverError; // Re-throw as it's already a proper error from initializeDriver
+          
+          // In auto-load mode, don't fail if default driver initialization fails
+          if (!this.config.autoLoadDrivers) {
+            throw new Error(`Driver startup failed for ${this.config.driverName}: ${defaultDriverError instanceof Error ? defaultDriverError.message : String(defaultDriverError)}`);
+          } else {
+            this.log.warn('Default driver initialization failed, continuing with auto-loaded drivers', {
+              traceId,
+              driverName: this.config.driverName,
+              error: defaultDriverError instanceof Error ? defaultDriverError.message : String(defaultDriverError)
+            });
+          }
         } finally {
           this.log.endTrace(defaultDriverTraceId);
         }
+      }
+      
+      try {
+        // Initialize AI Orchestrator if AI driver is available
+        if (this.driverRegistry.getDriver('ai-driver')) {
+          this.aiOrchestrator = new AIOrchestrator(this.driverRegistry, this.log);
+          await this.aiOrchestrator.initialize();
+          this.log.info('AI Orchestrator initialized successfully');
+        }
+        
+      } catch (error) {
+        this.log.error('AI Orchestrator initialization failed', { traceId }, error instanceof Error ? error : new Error(String(error)));
+        // Continue without AI capabilities
       }
       
       this.initialized = true;
@@ -272,10 +406,7 @@ export class RunixEngine {
           step: 'lookup_driver'
         });
         
-        throw new DriverError(`Driver not found: ${driverName}. Available: ${availableDrivers.join(', ')}`, driverName, {
-          operation: 'driver_lookup',
-          traceId
-        });
+        throw new Error(`Driver not found: ${driverName}. Available: ${availableDrivers.join(', ')}`);
       }
       
       this.log.debug('Driver metadata found', { 
@@ -342,10 +473,7 @@ export class RunixEngine {
 
         // Validate driver before proceeding
         if (!driver) {
-          throw new DriverError(`Driver instance is null for ${driverId}`, driverId, {
-            operation: 'driver_validation',
-            traceId
-          });
+          throw new Error(`Driver instance is null for ${driverId}`);
         }
 
         if (typeof driver.start !== 'function') {
@@ -355,10 +483,7 @@ export class RunixEngine {
             driverId,
             availableMethods: Object.getOwnPropertyNames(driver).filter(prop => typeof driver[prop] === 'function')
           });
-          throw new DriverError(`Invalid driver instance returned for ${driverId}: missing start method`, driverId, {
-            operation: 'driver_validation',
-            traceId
-          });
+          throw new Error(`Invalid driver instance returned for ${driverId}: missing start method`);
         }
 
         this.log.debug('Driver instance validated, calling start method', { 
@@ -502,12 +627,79 @@ export class RunixEngine {
       
       // Wrap error with more context if it's not already a RunixError
       if (!(error instanceof RunixError)) {
-        throw new DriverError(`Driver initialization failed: ${error}`, driverName, {
+        throw new DriverStartupError(`Driver initialization failed: ${error}`, {
           operation: 'driver_initialization',
-          traceId
+          traceId,
+          driverName
         }, error instanceof Error ? error : new Error(String(error)));
       }
       
+      throw error;
+    }
+  }
+
+  /**
+   * Load driver steps through introspection without initializing the driver process
+   */
+  private async loadDriverSteps(driverId: string): Promise<StepDefinition[]> {
+    const traceId = this.log.logMethodEntry('loadDriverSteps', { 
+      class: 'RunixEngine',
+      driverId 
+    }, [driverId]);
+
+    try {
+      const driverMetadata = this.driverRegistry.getDriver(driverId);
+      if (!driverMetadata) {
+        throw new Error(`Driver '${driverId}' not found in registry`);
+      }
+
+      this.log.debug('Loading steps for driver', { traceId, driverId, driverMetadata });
+
+      // Start driver temporarily to get step definitions
+      const tempDriver = await this.initializeDriver(driverId);
+      if (!tempDriver) {
+        throw new Error(`Failed to initialize driver ${driverId} for step introspection`);
+      }
+
+      let steps: StepDefinition[] = [];
+      
+      try {
+        // Try to get steps through introspection
+        if (typeof tempDriver.introspect === 'function') {
+          const introspectionResult = await tempDriver.introspect('steps');
+          if (introspectionResult && introspectionResult.steps) {
+            steps = introspectionResult.steps;
+          }
+        } else {
+          this.log.warn(`Driver ${driverId} does not support introspection`, { traceId, driverId });
+        }
+      } catch (introspectionError) {
+        this.log.warn(`Failed to introspect driver ${driverId}`, { 
+          traceId, 
+          driverId, 
+          error: introspectionError instanceof Error ? introspectionError.message : String(introspectionError) 
+        });
+      }
+
+      this.log.debug('Steps loaded for driver', { 
+        traceId, 
+        driverId, 
+        stepCount: steps.length,
+        steps: steps.map(s => ({ id: s.id, pattern: s.pattern }))
+      });
+
+      this.log.logMethodExit('loadDriverSteps', traceId, { 
+        driverId, 
+        stepCount: steps.length 
+      });
+
+      return steps;
+      
+    } catch (error) {
+      this.log.logMethodError('loadDriverSteps', traceId, error instanceof Error ? error : new Error(String(error)), {
+        class: 'RunixEngine',
+        driverId
+      });
       throw error;
     }
   }
@@ -691,10 +883,7 @@ export class RunixEngine {
       }
       
       if (!stepMatch) {
-        const error = new StepExecutionError(`No matching step found: "${stepText}"`, { 
-          operation: 'step_matching',
-          traceId 
-        });
+        const error = new Error(`No matching step found: "${stepText}"`);
         this.log.error('No matching step pattern found', { traceId, stepText }, error);
         return {
           success: false,
@@ -724,11 +913,7 @@ export class RunixEngine {
         
         const driver = await this.initializeDriver(driverId);
         if (!driver) {
-          const error = new DriverError(`Failed to initialize driver ${driverId} for step: "${stepText}"`, driverId, {
-            operation: 'lazy_driver_initialization',
-            traceId,
-            stepText
-          });
+          const error = new Error(`Failed to initialize driver ${driverId} for step: "${stepText}"`);
           this.log.error('Lazy driver initialization failed', { traceId, driverId, stepText }, error);
           return {
             success: false,
@@ -893,8 +1078,7 @@ export class RunixEngine {
     
     try {
       this.log.info('Shutting down engine', { executionId: this.executionId });
-      
-      // Shut down all initialized drivers
+        // Shut down all initialized drivers
       for (const [driverId, driver] of this.drivers.entries()) {
         try {
           this.log.debug(`Shutting down driver: ${driverId}`);
@@ -909,6 +1093,17 @@ export class RunixEngine {
       }
       
       this.drivers.clear();
+      
+      // Force stop all driver processes through process manager
+      try {
+        this.log.debug('Force stopping all driver processes');
+        const { DriverProcessManager } = await import('../drivers/management/DriverProcessManager');
+        const processManager = DriverProcessManager.getInstance();
+        await processManager.stopAllDrivers();
+        this.log.debug('All driver processes stopped');
+      } catch (error) {
+        this.log.error(`Error stopping driver processes: ${error}`);
+      }
       
       // Safely disconnect from database if initialized
       try {
@@ -928,6 +1123,43 @@ export class RunixEngine {
     } finally {
       this.log.endTrace(traceId);
     }
+  }
+
+  // New AI-specific methods
+  async startAISession(intent: string, mode: 'agent' | 'ask' | 'chat' = 'chat'): Promise<string> {
+    if (!this.aiOrchestrator) {
+      throw new Error('AI Orchestrator not available');
+    }
+    
+    return await this.aiOrchestrator.startSession(intent, mode);
+  }
+
+  async analyzeAndPlan(intent?: string): Promise<any> {
+    if (!this.aiOrchestrator) {
+      throw new Error('AI Orchestrator not available');
+    }
+    
+    return await this.aiOrchestrator.analyzeAndPlan(intent);
+  }
+
+  async executeNextAIStep(): Promise<any> {
+    if (!this.aiOrchestrator) {
+      throw new Error('AI Orchestrator not available');
+    }
+    
+    return await this.aiOrchestrator.executeNextStep();
+  }
+
+  async confirmAIAction(stepIndex: number, confirmed: boolean): Promise<any> {
+    if (!this.aiOrchestrator) {
+      throw new Error('AI Orchestrator not available');
+    }
+    
+    return await this.aiOrchestrator.confirmAndExecute(stepIndex, confirmed);
+  }
+
+  getAISession(): any {
+    return this.aiOrchestrator?.getCurrentSession() || null;
   }
 }
 

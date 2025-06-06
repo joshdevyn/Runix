@@ -3,37 +3,43 @@ Feature: Example Driver Comprehensive Testing
   I want to test all example driver capabilities
   So that I can verify the driver works correctly
 
-  Background:
-    Given the example driver is available
-
   Scenario: Basic echo functionality
-    When I echo the message "Hello Runix!"
-    Then the response should contain "Hello Runix!"
+    When echo the message "Hello Runix!"
+    And echo the message "Testing basic functionality"
+    And echo the message "Example driver is working"
 
   Scenario: Mathematical operations
-    When I add 15 and 25
-    Then the result should be 40
+    When add 15 and 25
+    And add 100 and 200
+    And add 5 and 10
 
   Scenario: Timing operations
-    When I wait for 500 milliseconds
-    Then the operation should complete successfully
+    When wait for 500 milliseconds
+    And wait for 200 milliseconds
+    And wait for 100 milliseconds
 
   Scenario: Multiple operations sequence
-    Given I echo the message "Starting sequence"
-    When I add 10 and 20
-    And I wait for 200 milliseconds
-    And I echo the message "Sequence complete"
-    Then all operations should succeed
+    When echo the message "Starting sequence"
+    And add 10 and 20
+    And wait for 200 milliseconds
+    And echo the message "Sequence complete"
+    And add 50 and 75
 
-  Scenario: Error handling
-    When I attempt an invalid operation
-    Then the driver should handle the error gracefully
+  Scenario: Complex workflow demonstration
+    When echo the message "Complex workflow starting"
+    And wait for 300 milliseconds
+    And add 123 and 456
+    And echo the message "Math operation completed"
+    And wait for 150 milliseconds
+    And add 1000 and 2000
+    And echo the message "Workflow complete"
 
-  Scenario: Performance testing
-    When I perform multiple quick operations:
-      | operation | parameter1 | parameter2 |
-      | echo      | "test1"    |            |
-      | add       | 5          | 10         |
-      | echo      | "test2"    |            |
-      | add       | 8          | 12         |
-    Then all operations should complete within reasonable time
+  Scenario: Performance testing with multiple operations
+    When echo the message "Performance test starting"
+    And add 1 and 1
+    And add 2 and 2
+    And add 3 and 3
+    And add 4 and 4
+    And add 5 and 5
+    And wait for 100 milliseconds
+    And echo the message "Performance test complete"

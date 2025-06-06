@@ -1,7 +1,7 @@
 import { request as httpRequest } from 'http';
 import { Logger } from '../../utils/logger';
 import { DriverMetadata } from '../driverRegistry';
-import { DriverError } from '../../utils/errors';
+import { DriverCommunicationError } from '../../utils/errors';
 
 /**
  * HTTP implementation of a driver instance
@@ -62,9 +62,8 @@ export class HttpDriverInstance {
         args
       });
       
-      return response;
-    } catch (error) {
-      throw new DriverError(`HTTP execution failed for ${action}`, this.metadata.id, {
+      return response;    } catch (error) {
+      throw new DriverCommunicationError(this.metadata.id, action, {
         operation: 'http_execute'
       }, error instanceof Error ? error : new Error(String(error)));
     }

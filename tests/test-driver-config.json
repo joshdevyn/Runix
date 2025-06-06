@@ -1,0 +1,16 @@
+{
+  "model": "gpt-4o",
+  "temperature": 0.7,
+  "maxTokens": 1000,
+  "providers": [
+    {
+      "name": "ollama",
+      "type": "local",
+      "config": {
+        "baseUrl": "http://localhost:11434",
+        "model": "llama2"
+      }
+    }
+  ],
+  "activeProvider": "ollama"
+}

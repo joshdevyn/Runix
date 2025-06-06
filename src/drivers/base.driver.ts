@@ -6,29 +6,51 @@ import {
   DriverInstance,
   StepExecutionResult
 } from './driver.interface';
+import { DriverMetadata } from './driverRegistry';
 import { Logger } from '../utils/logger';
+import { DriverError } from '../utils/errors';
 
 /**
  * Base implementation of a driver instance
  */
 export class BaseDriverInstance extends EventEmitter implements DriverInstance {
-  protected driver: AutomationDriver;
+  protected driver?: AutomationDriver;
   protected isRunning: boolean = false;
   protected config: DriverConfig = {};
+  protected metadata?: DriverMetadata;
   
-  constructor(driver: AutomationDriver) {
+  constructor(driverOrMetadata: AutomationDriver | DriverMetadata) {
     super();
-    this.driver = driver;
+    if ('execute' in driverOrMetadata) {
+      // It's an AutomationDriver instance
+      this.driver = driverOrMetadata;
+    } else {
+      // It's metadata, we'll create a proxy driver later
+      this.metadata = driverOrMetadata;
+    }
   }
   
   async start(): Promise<DriverCapabilities> {
     this.isRunning = true;
-    return this.driver.getCapabilities();
+    if (this.driver) {
+      return this.driver.getCapabilities();
+    } else {
+      // Return capabilities from metadata
+      return {
+        name: this.metadata?.name || 'Unknown',
+        version: this.metadata?.version || '1.0.0',
+        description: 'Driver instance created from metadata',
+        author: 'Unknown',
+        supportedActions: []
+      };
+    }
   }
   
   async initialize(config: DriverConfig): Promise<void> {
     this.config = config;
-    await this.driver.initialize(config);
+    if (this.driver) {
+      await this.driver.initialize(config);
+    }
   }
   
   async execute(action: string, args: any[]): Promise<StepExecutionResult> {
@@ -36,6 +58,13 @@ export class BaseDriverInstance extends EventEmitter implements DriverInstance {
       return {
         success: false,
         error: { message: 'Driver not started' }
+      };
+    }
+    
+    if (!this.driver) {
+      return {
+        success: false,
+        error: { message: 'Driver not properly initialized' }
       };
     }
     
@@ -55,8 +84,26 @@ export class BaseDriverInstance extends EventEmitter implements DriverInstance {
     return this.execute(action, args);
   }
   
+  async introspect(type?: string): Promise<any> {
+    if (!this.isRunning) {
+      throw new Error('Driver not started');
+    }
+    
+    if (!this.driver) {
+      throw new Error('Driver not properly initialized');
+    }
+    
+    // Try to call introspect on the driver if it supports it
+    if (typeof (this.driver as any).introspect === 'function') {
+      return await (this.driver as any).introspect(type);
+    }
+    
+    // Fallback to executing introspect as an action
+    return await this.execute('introspect', [{ type: type || 'steps' }]);
+  }
+  
   async shutdown(): Promise<void> {
-    if (this.isRunning) {
+    if (this.isRunning && this.driver) {
       await this.driver.shutdown();
       this.isRunning = false;
     }

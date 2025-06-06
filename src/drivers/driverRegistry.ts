@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../utils/logger';
 import { findExecutable } from '../utils/executableFinder';
-import { DriverProcessManager } from './driverProcessManager';
+import { DriverProcessManager } from './management/DriverProcessManager';
 import { DriverError, DriverStartupError, ConfigurationError } from '../utils/errors';
 
 export interface DriverMetadata {
@@ -379,27 +379,52 @@ export class DriverRegistry {
   private async createDriverInstance(metadata: DriverMetadata): Promise<any> {
     const processManager = DriverProcessManager.getInstance();
     
-    // Start the driver process
-    const processInfo = await processManager.startDriver(metadata);
-    
-    // Create the appropriate driver instance based on transport type
-    const transport = metadata.config?.transport || 'websocket';
-    
-    switch (transport) {
-      case 'websocket':
-        const { WebSocketDriverInstance } = await import('./transport/websocket.driver');
-        const wsInstance = new WebSocketDriverInstance(metadata, processInfo.port);
-        await wsInstance.start(); // Initialize the connection
-        return wsInstance;
-        
-      case 'http':
-        const { HttpDriverInstance } = await import('./transport/http.driver');
-        const httpInstance = new HttpDriverInstance(metadata, processInfo.port);
-        await httpInstance.start(); // Initialize the connection
-        return httpInstance;
-        
-      default:
-        throw new Error(`Unsupported transport type: ${transport}`);
+    try {
+      // Ensure executable is defined before starting the driver
+      if (!metadata.executable) {
+        throw new DriverStartupError(metadata.id, {
+          reason: 'missing_executable'
+        }, new Error(`No executable found for driver: ${metadata.id}`));
+      }
+
+      // Create compatible metadata for process manager
+      const processMetadata = {
+        ...metadata,
+        executable: metadata.executable // Now guaranteed to be string
+      };
+
+      // Start the driver process
+      const processInfo = await processManager.startDriver(processMetadata);
+      
+      // Create the appropriate driver instance based on transport type
+      const transport = metadata.config?.transport || 'websocket';
+      
+      switch (transport) {
+        case 'websocket':
+          const { WebSocketDriverInstance } = await import('./transport/websocket.driver');
+          const wsInstance = new WebSocketDriverInstance(metadata, processInfo.port);
+          await wsInstance.start(); // Initialize the connection
+          return wsInstance;
+          
+        case 'http':
+          const { HttpDriverInstance } = await import('./transport/http.driver');
+          const httpInstance = new HttpDriverInstance(metadata, processInfo.port);
+          await httpInstance.start(); // Initialize the connection
+          return httpInstance;
+          
+        default:
+          throw new DriverStartupError(metadata.id, { 
+            transport,
+            reason: 'unsupported_transport'
+          }, new Error(`Unsupported transport type: ${transport}`));
+      }
+    } catch (error) {
+      if (error instanceof DriverStartupError) {
+        throw error;
+      }
+      throw new DriverStartupError(metadata.id, {
+        operation: 'create_instance'
+      }, error instanceof Error ? error : new Error(String(error)));
     }
   }
 
@@ -408,6 +433,19 @@ export class DriverRegistry {
    */
   public getDriver(driverId: string): DriverMetadata | undefined {
     return this.drivers.get(driverId);
+  }
+
+  /**
+   * Get running driver instance
+   */
+  public async getDriverInstance(driverId: string): Promise<any> {
+    // Check if driver is already running
+    if (this.processes.has(driverId)) {
+      return this.processes.get(driverId)!;
+    }
+    
+    // Start the driver if not running
+    return await this.startDriver(driverId);
   }
 
   /**
@@ -518,9 +556,61 @@ export class DriverRegistry {
   }
 
   /**
-   * Get list of currently running driver IDs
+   * Get process information for a running driver
    */
-  public getRunningDriverIds(): string[] {
-    return Array.from(this.processes.keys());
+  public getDriverProcessInfo(driverId: string): any {
+    const processManager = DriverProcessManager.getInstance();
+    return processManager.getProcessInfo(driverId);
+  }
+
+  /**
+   * List all running driver processes
+   */
+  public listRunningDrivers(): string[] {
+    const processManager = DriverProcessManager.getInstance();
+    const allProcesses = processManager.getAllProcesses();
+    return Array.from(allProcesses.keys());
+  }
+
+  /**
+   * Register a plugin driver
+   */
+  public registerPluginDriver(driverId: string, pluginPath: string): void {
+    const traceId = this.log.startTrace('register-plugin-driver');
+    
+    try {
+      const driverJsonPath = path.join(pluginPath, 'driver.json');
+      
+      if (!fs.existsSync(driverJsonPath)) {
+        throw new Error(`Driver configuration not found at ${driverJsonPath}`);
+      }
+
+      const driverConfig = JSON.parse(fs.readFileSync(driverJsonPath, 'utf-8'));
+      
+      const metadata: DriverMetadata = {
+        id: driverId,
+        name: driverConfig.name || driverId,
+        version: driverConfig.version || '1.0.0',
+        path: pluginPath,
+        executable: driverConfig.executable,
+        config: driverConfig
+      };
+
+      this.drivers.set(driverId, metadata);
+      
+      this.log.info('Plugin driver registered successfully', {
+        traceId,
+        driverId,
+        pluginPath,
+        metadata
+      });
+      
+    } catch (error) {
+      this.log.logMethodError('registerPluginDriver', traceId, error instanceof Error ? error : new Error(String(error)), {
+        driverId,
+        pluginPath
+      });
+      throw error;
+    }
   }
 }

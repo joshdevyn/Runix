@@ -8,26 +8,40 @@ REM Set default port if not provided
 set "PORT=8000"
 if not "%RUNIX_DRIVER_PORT%"=="" set "PORT=%RUNIX_DRIVER_PORT%"
 
-REM Parse command line arguments for port
+REM Parse command line arguments for port - simplified logic
 :parse_args
 if "%~1"=="" goto :start_driver
-if "%~1"=="--port" (
-    set "PORT=%~2"
-    shift
+
+REM Handle --port=VALUE format
+echo %~1 | findstr /r "^--port=" >nul
+if !errorlevel! equ 0 (
+    for /f "tokens=2 delims==" %%a in ("%~1") do set "PORT=%%a"
     shift
     goto :parse_args
 )
-if "%~1" NEQ "" (
-    echo %~1 | findstr /r "^--port=" >nul
-    if !errorlevel! equ 0 (
-        for /f "tokens=2 delims==" %%a in ("%~1") do set "PORT=%%a"
+
+REM Handle --port VALUE format
+if "%~1"=="--port" (
+    if not "%~2"=="" (
+        set "PORT=%~2"
+        shift
+        shift
+        goto :parse_args
     )
 )
+
 shift
 goto :parse_args
 
 :start_driver
 echo Starting WebDriver on port %PORT%...
+
+REM Validate port number
+echo %PORT% | findstr /r "^[0-9][0-9]*$" >nul
+if !errorlevel! neq 0 (
+    echo Error: Invalid port number: %PORT%
+    exit /b 1
+)
 
 REM Try to find Node.js
 where node >nul 2>&1
@@ -42,7 +56,10 @@ set "RUNIX_DRIVER_PORT=%PORT%"
 set "WEB_DRIVER_ENGINE=selenium"
 
 REM Try different driver implementations in order of preference
-if exist "%DRIVER_DIR%lightweight-driver.js" (
+if exist "%DRIVER_DIR%WebDriver.exe" (
+    echo Using compiled WebDriver executable
+    "%DRIVER_DIR%WebDriver.exe"
+) else if exist "%DRIVER_DIR%lightweight-driver.js" (
     echo Using lightweight driver implementation
     node "%DRIVER_DIR%lightweight-driver.js"
 ) else if exist "%DRIVER_DIR%driver.js" (
@@ -51,6 +68,9 @@ if exist "%DRIVER_DIR%lightweight-driver.js" (
 ) else if exist "%DRIVER_DIR%dist\index.js" (
     echo Using compiled TypeScript driver
     node "%DRIVER_DIR%dist\index.js"
+) else if exist "%DRIVER_DIR%index.js" (
+    echo Using index.js implementation
+    node "%DRIVER_DIR%index.js"
 ) else (
     echo Error: No driver implementation found
     echo Available files in %DRIVER_DIR%:

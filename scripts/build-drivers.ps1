@@ -72,6 +72,9 @@ foreach ($driver in $drivers) {
         if (-not (Test-Path $destPath)) {
             New-Item -ItemType Directory -Force -Path $destPath | Out-Null
         }
+        # Copy driver files from source to destination
+        Copy-Item -Path "$sourcePath\*" -Destination $destPath -Recurse -Force
+        Copy-Item -Path "$($driver.FullName)\*" -Destination $destPath -Recurse -Force
         
         # Build driver metadata
         $driverInfo = @{

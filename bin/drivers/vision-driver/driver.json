@@ -1,0 +1,27 @@
+{
+  "id": "vision-driver",
+  "name": "VisionDriver",
+  "description": "Computer vision driver for OCR and UI element detection",
+  "version": "1.0.0",
+  "author": "Runix Team",
+  "license": "MIT",
+  "executable": "VisionDriver.exe",
+  "protocol": "websocket",
+  "transport": "websocket",
+  "features": [
+    "execute",
+    "introspection",
+    "health-check"
+  ],
+  "actions": [
+    "extractText",
+    "detectUI",
+    "findImage",
+    "analyzeScene"
+  ],
+  "config": {
+    "ocrLanguage": "eng",
+    "confidenceThreshold": 0.6,
+    "tempDir": "./temp"
+  }
+}

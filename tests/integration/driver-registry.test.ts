@@ -1,49 +1,101 @@
-import * as path from 'path';
-import { DriverRegistry, loadDriversFromDirectory } from '../../src/drivers/driverRegistry';
+import { DriverRegistry } from '../../src/drivers/driverRegistry';
+import { ConfigValidator } from '../../src/utils/config-validator';
+import path from 'path';
+import fs from 'fs';
 
-describe('Driver Registry Integration Tests', () => {
-  beforeEach(async () => {
-    // Reset before each test
-    jest.resetModules();
-    // Ensure clean registry for each test
-    // This is a bit hacky, but needed since DriverRegistry uses a singleton pattern
-    (DriverRegistry as any).instance = undefined;
+describe('DriverRegistry Integration', () => {
+  let registry: DriverRegistry;
+  const testDriversDir = path.join(__dirname, '../fixtures/test-drivers');
+
+  beforeAll(async () => {
+    // Create test driver structure
+    await fs.promises.mkdir(testDriversDir, { recursive: true });
+    
+    // Create a test driver
+    const driverDir = path.join(testDriversDir, 'test-driver');
+    await fs.promises.mkdir(driverDir, { recursive: true });
+    
+    // Create driver.json
+    const driverConfig = {
+      name: 'TestDriver',
+      executable: 'index.js',
+      transport: 'websocket'
+    };
+    await fs.promises.writeFile(
+      path.join(driverDir, 'driver.json'),
+      JSON.stringify(driverConfig, null, 2)
+    );
+    
+    // Create a simple driver implementation
+    const driverCode = `
+const WebSocket = require('ws');
+const port = parseInt(process.env.RUNIX_DRIVER_PORT || '9998', 10);
+
+const server = require('http').createServer();
+const wss = new WebSocket.Server({ server });
+
+wss.on('connection', (ws) => {
+  ws.on('message', (data) => {
+    const request = JSON.parse(data);
+    
+    if (request.method === 'capabilities') {
+      ws.send(JSON.stringify({
+        id: request.id,
+        type: 'response',
+        result: {
+          name: 'TestDriver',
+          version: '1.0.0',
+          supportedActions: ['testAction']
+        }
+      }));
+    }
   });
-  
-  test('can discover and register drivers', async () => {
-    const registry = DriverRegistry.getInstance();
-    
-    // Load drivers from example directory
-    await loadDriversFromDirectory(path.resolve(__dirname, '../../drivers'));
-    
-    // Should find the example driver
-    const drivers = registry.getAllDrivers();
-    expect(drivers.length).toBeGreaterThan(0);
-    
-    // Verify the example driver was loaded
-    const exampleDriver = registry.getDriver('exampledriver');
-    expect(exampleDriver).toBeDefined();
-    expect(exampleDriver?.name).toBe('ExampleDriver');
+});
+
+server.listen(port, '127.0.0.1');
+`;
+    await fs.promises.writeFile(path.join(driverDir, 'index.js'), driverCode);
   });
-  
-  test('can start and get driver instance', async () => {
-    const registry = DriverRegistry.getInstance();
+
+  beforeEach(() => {
+    registry = DriverRegistry.getInstance();
+  });
+
+  afterAll(async () => {
+    // Cleanup test drivers
+    await fs.promises.rm(testDriversDir, { recursive: true, force: true });
+  });
+
+  test('should discover drivers from directory', async () => {
+    // Set custom driver directory for test
+    process.env.RUNIX_DRIVER_DIR = testDriversDir;
     
-    // Load drivers
-    await loadDriversFromDirectory(path.resolve(__dirname, '../../drivers'));
+    await registry.initialize();
     
-    // Start the example driver
-    const driverId = 'exampledriver';
-    const driverInstance = await registry.startDriver(driverId);
+    const drivers = registry.listDriverIds();
+    expect(drivers).toContain('test-driver');
+  });
+
+  test('should validate driver configuration', () => {
+    const issues = ConfigValidator.validateDrivers();
     
-    // Check that the driver instance was created
+    // Should have issues if no drivers directory exists in cwd
+    expect(Array.isArray(issues)).toBe(true);
+  });
+
+  test('should start and communicate with driver', async () => {
+    // Set custom driver directory for test
+    process.env.RUNIX_DRIVER_DIR = testDriversDir;
+    
+    await registry.initialize();
+    
+    const driverInstance = await registry.startDriver('test-driver');
     expect(driverInstance).toBeDefined();
     
-    // Verify we can get the started instance
-    const retrievedInstance = registry.getDriverInstance(driverId);
-    expect(retrievedInstance).toBe(driverInstance);
+    // Test driver communication
+    const capabilities = await driverInstance.getCapabilities();
+    expect(capabilities.name).toBe('TestDriver');
     
-    // Clean up
     await driverInstance.shutdown();
   });
 });

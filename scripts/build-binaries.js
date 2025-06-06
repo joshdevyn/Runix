@@ -57,7 +57,7 @@ logger.info(`Building binaries for ${platforms.join(', ')} in ${targetDir}`);
 
 // Build command - let pkg use its default naming
 const pkgArgs = [
-  'dist/index.js',
+  'dist/src/index.js',
   '--targets', platforms.map(p => `node${nodeVersion}-${p}`).join(','),
   '--out-path', 'bin'
 ];
@@ -76,12 +76,11 @@ pkgProcess.on('close', (code) => {
   // Check what files were actually created and rename them appropriately
   const binContents = fs.readdirSync('bin').filter(file => file.startsWith('runix'));
   logger.info(`Files created in bin: ${binContents.join(', ')}`);
-  
-  // Map platform-specific naming
+    // Map platform-specific naming
   const platformMapping = {
-    'win-x64': { pattern: /runix.*win.*\.exe$/i, finalName: 'runix.exe' },
-    'linux-x64': { pattern: /runix.*linux/i, finalName: 'runix' },
-    'macos-x64': { pattern: /runix.*macos/i, finalName: 'runix-macos' }
+    'win-x64': { pattern: /index.*win.*\.exe$/i, finalName: 'runix.exe' },
+    'linux-x64': { pattern: /index.*linux/i, finalName: 'runix' },
+    'macos-x64': { pattern: /index.*macos/i, finalName: 'runix-macos' }
   };
   
   // Process each created binary

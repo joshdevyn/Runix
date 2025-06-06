@@ -63,60 +63,38 @@ if (engine === 'selenium') {
     path.join(process.cwd(), 'selenium-server.jar'),
     path.join(process.cwd(), 'drivers', 'web-driver', 'selenium-server.jar'),
     path.join(process.cwd(), 'bin', 'drivers', 'web-driver', 'selenium-server.jar'),
-    // For packaged binaries
     path.join(path.dirname(process.execPath), 'drivers', 'web-driver', 'selenium-server.jar'),
     path.join(path.dirname(process.execPath), 'selenium-server.jar')
   ];
   
   let seleniumJar = null;
-  for (const location of jarLocations) {
-    if (fs.existsSync(location)) {
-      seleniumJar = location;
-      logger.log(`Found Selenium JAR at: ${seleniumJar}`);
+  for (const jarPath of jarLocations) {
+    if (fs.existsSync(jarPath)) {
+      seleniumJar = jarPath;
+      logger.log(`Found Selenium JAR at: ${jarPath}`);
       break;
     }
   }
   
   if (seleniumJar) {
-    logger.log(`Starting Selenium server using JAR at: ${seleniumJar}`);
-    
-    // Check if Java is available
     try {
-      const { execSync } = require('child_process');
-      execSync('java -version', { stdio: 'pipe' });
-      
-      seleniumProcess = spawn('java', [
-        '-jar', seleniumJar, 
-        '--port', seleniumPort.toString(),
-        '--log-level', 'WARNING'
-      ], {
+      logger.log(`Starting Selenium server on port ${seleniumPort}`);
+      seleniumProcess = spawn('java', ['-jar', seleniumJar, '-port', seleniumPort.toString()], {
         stdio: 'pipe'
       });
       
-      seleniumProcess.stdout.on('data', (data) => {
-        const output = data.toString();
-        if (output.includes('Selenium Server is up and running')) {
-          logger.log('Selenium: Server is ready');
-        }
+      seleniumProcess.on('error', (err) => {
+        logger.error('Failed to start Selenium server:', err);
       });
       
-      seleniumProcess.stderr.on('data', (data) => {
-        const error = data.toString();
-        if (!error.includes('SLF4J') && !error.includes('WARNING')) {
-          logger.error('Selenium error:', error);
-        }
-      });
-      
-      logger.log('Selenium server starting...');
-    } catch (error) {
-      logger.error('Java not found or failed to start Selenium:', error.message);
-      logger.log('Falling back to system browser mode');
-      seleniumProcess = null;
+      // Wait a moment for Selenium to start
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    } catch (err) {
+      logger.error('Error starting Selenium server:', err);
+      logger.log('Falling back to direct browser automation');
     }
   } else {
-    logger.error('Selenium JAR not found at any location:');
-    jarLocations.forEach(loc => logger.error('  - ' + loc));
-    logger.log('Will use system browser fallback mode');
+    logger.log('Selenium JAR not found, using direct browser automation');
   }
 }
 

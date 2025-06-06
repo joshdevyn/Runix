@@ -52,6 +52,11 @@ export interface DriverInstance extends EventEmitter {
   execute(action: string, args: any[]): Promise<StepExecutionResult>;
   
   /**
+   * Introspect the driver for capabilities and step definitions
+   */
+  introspect?(type?: string): Promise<any>;
+  
+  /**
    * Execute a step by name with arguments
    */
   executeStep(action: string, args: any[]): Promise<StepExecutionResult>;

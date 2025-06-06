@@ -61,7 +61,7 @@ export class WebDriverAutomation {
     this.config = {
       browser: 'chrome',
       headless: false,
-      timeout: 30000,
+      timeout: 60000, // Increased from 30s to 60s
       windowSize: { width: 1920, height: 1080 },
       ...config
     };
@@ -154,10 +154,10 @@ export class WebDriverAutomation {
 
     this.driver = await builder.build();
     
-    // Set timeouts
+    // Set timeouts with increased values
     await this.driver.manage().setTimeouts({
       implicit: this.config.timeout,
-      pageLoad: this.config.timeout! * 2,
+      pageLoad: this.config.timeout! * 2, // Double the page load timeout
       script: this.config.timeout
     });
 
@@ -173,10 +173,31 @@ export class WebDriverAutomation {
     }
     
     this.logger.info(`Navigating to: ${url}`);
-    await this.driver.get(url);
     
-    // Wait for page to load
-    await this.driver.wait(until.elementLocated(By.tagName('body')), this.config.timeout!);
+    try {
+      await this.driver.get(url);
+      
+      // Wait for page to load with retry logic
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          await this.driver.wait(until.elementLocated(By.tagName('body')), this.config.timeout!);
+          break;
+        } catch (err) {
+          retries--;
+          if (retries === 0) {
+            this.logger.error(`Failed to load page after retries: ${url}`);
+            throw new Error(`Page failed to load: ${url}. The page may be slow or unresponsive.`);
+          }
+          this.logger.info(`Retrying page load, attempts remaining: ${retries}`);
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+        }
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.error(`Navigation failed for ${url}:`, err);
+      throw new Error(`Navigation to ${url} failed: ${errorMessage}`);
+    }
   }
 
   async findElement(selector: string | ElementSelector): Promise<WebElement> {
@@ -465,7 +486,7 @@ export class WebDriverAutomation {
     } else {
       const handles = await this.driver!.getAllWindowHandles();
       const currentHandle = await this.driver!.getWindowHandle();
-      const newHandle = handles.find(h => h !== currentHandle);
+      const newHandle = handles.find((h: string) => h !== currentHandle);
       if (newHandle) {
         this.logger.info(`Switching to new window: ${newHandle}`);
         await this.driver!.switchTo().window(newHandle);

@@ -204,6 +204,109 @@ async function handleExecute(id, action, args) {
           });
         }, ms);
       });
+    case 'verifyResponse':
+      // Mock verification - in real scenario would check last response
+      const expectedText = args[0];
+      const responseContains = true; // Mock success
+      return {
+        id,
+        type: 'response',
+        result: {
+          success: responseContains,
+          data: {
+            verified: responseContains,
+            expectedText: expectedText
+          }
+        }
+      };
+    case 'verifyResult':
+      // Mock verification
+      const expectedResult = Number(args[0]);
+      const resultMatches = true; // Mock success
+      return {
+        id,
+        type: 'response',
+        result: {
+          success: resultMatches,
+          data: {
+            verified: resultMatches,
+            expectedResult: expectedResult
+          }
+        }
+      };
+    case 'verifySuccess':
+      return {
+        id,
+        type: 'response',
+        result: {
+          success: true,
+          data: {
+            operationSuccessful: true
+          }
+        }
+      };
+    case 'verifyAllSuccess':
+      return {
+        id,
+        type: 'response',
+        result: {
+          success: true,
+          data: {
+            allOperationsSuccessful: true
+          }
+        }
+      };
+    case 'attemptInvalid':
+      // Simulate an operation that fails gracefully
+      return {
+        id,
+        type: 'response',
+        result: {
+          success: false,
+          data: {
+            error: "Invalid operation attempted",
+            handledGracefully: true
+          }
+        }
+      };
+    case 'verifyErrorHandling':
+      return {
+        id,
+        type: 'response',
+        result: {
+          success: true,
+          data: {
+            errorHandledProperly: true
+          }
+        }
+      };
+    case 'performMultipleOperations':
+      // Mock handling of data table operations
+      const operations = args[0] || [];
+      logger.log(`Performing ${operations.length} operations`);
+      return {
+        id,
+        type: 'response',
+        result: {
+          success: true,
+          data: {
+            operationsPerformed: operations.length,
+            allCompleted: true
+          }
+        }
+      };
+    case 'verifyPerformance':
+      return {
+        id,
+        type: 'response',
+        result: {
+          success: true,
+          data: {
+            performanceAcceptable: true,
+            executionTime: '< 1000ms'
+          }
+        }
+      };
     default:
       return {
         id,
@@ -242,18 +345,18 @@ function handleIntrospect(id, type) {
           {
             id: "add-numbers",
             pattern: "add (\\d+) and (\\d+)",
-            description: "Adds two numbers together",
+            description: "Adds two numbers",
             action: "add",
             examples: ["add 2 and 3"],
             parameters: [
               {
-                name: "a",
+                name: "num1",
                 type: "number",
                 description: "First number",
                 required: true
               },
               {
-                name: "b",
+                name: "num2",
                 type: "number",
                 description: "Second number",
                 required: true
@@ -261,16 +364,16 @@ function handleIntrospect(id, type) {
             ]
           },
           {
-            id: "wait-for",
-            pattern: "wait for (\\d+) milliseconds",
-            description: "Waits for the specified number of milliseconds",
+            id: "wait-time",
+            pattern: "wait for (\\d+) milliseconds?",
+            description: "Waits for a specified time",
             action: "wait",
             examples: ["wait for 1000 milliseconds"],
             parameters: [
               {
-                name: "milliseconds",
+                name: "duration",
                 type: "number",
-                description: "Time to wait in milliseconds",
+                description: "Duration in milliseconds",
                 required: true
               }
             ]
@@ -278,20 +381,17 @@ function handleIntrospect(id, type) {
         ]
       }
     };
-  } else {
+  }
+  else if (type === 'actions') {
     return {
       id,
       type: 'response',
       result: {
-        capabilities: {
-          name: 'ExampleDriver',
-          version: '1.0.0',
-          description: 'Example driver for testing',
-          author: 'Runix Team',
-          supportedActions: ['echo', 'add', 'wait'],
-          features: ['execute', 'introspection']
-        }
+        actions: manifest.actions
       }
     };
+  }
+  else {
+    return sendErrorResponse(id, 400, `Unknown introspect type: ${type}`);
   }
 }

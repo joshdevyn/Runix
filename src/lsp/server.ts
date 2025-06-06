@@ -24,7 +24,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
 import { parseFeatureFile, parseFeatureAst } from '../parser/parser';
 import { DriverRegistry, StepDefinition } from '../drivers/driverRegistry';
-import { driverIntrospectionService } from './driverIntrospection';
+import { DriverIntrospectionService } from './driverIntrospection';
 import { Logger } from '../utils/logger';
 
 // Create connection and documents
@@ -37,22 +37,26 @@ let stepDefinitions: StepDefinition[] = [];
 connection.onInitialize(async (params: InitializeParams) => {
   logger.info('Runix language server initializing...');
 
-  // Load all drivers
-  const driverRegistry = DriverRegistry.getInstance();
+  // Load all drivers through the introspection service
+  const driverIntrospectionService = new DriverIntrospectionService();
   try {
-    await driverRegistry.initialize(); // This will call discoverDrivers internally
+    const discoveryResult = await driverIntrospectionService.discoverAllDrivers();
+    stepDefinitions = driverIntrospectionService.getAllStepDefinitions();
+    
+    logger.info(`Loaded ${stepDefinitions.length} step definitions from ${discoveryResult.drivers.length} drivers`);
+    
+    if (discoveryResult.errors.length > 0) {
+      logger.warn('Some drivers failed to load:', discoveryResult.errors);
+    }
   } catch (error) {
-    logger.error('Failed to initialize LSP driver registry', { 
+    logger.error('Failed to discover drivers and load step definitions', { 
       class: 'LSPServer',
       method: 'onInitialize' 
     }, error);
   }
 
-  // Get step definitions from all drivers
-  stepDefinitions = await driverIntrospectionService.getAllStepDefinitions();
-
   // Fix: Use listDriverIds() instead of getAllDrivers()
-  const driverIds = driverRegistry.listDriverIds();
+  const driverIds = DriverRegistry.getInstance().listDriverIds();
   logger.info(`Loaded ${stepDefinitions.length} step definitions from ${driverIds.length} drivers`);
 
   return {

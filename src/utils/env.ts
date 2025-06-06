@@ -10,8 +10,21 @@ export class EnvManager {
   private env: Map<string, string> = new Map();
   private envFilePath?: string;
   private logger = Logger.getInstance();
-
   private constructor() {
+    // Initialize logger with minimal config to avoid circular dependencies
+    try {
+      this.logger = Logger.getInstance();
+    } catch (error) {
+      // Fallback to console if Logger is not available during initialization
+      console.warn('Logger not available during EnvManager initialization, using console fallback');
+      this.logger = {
+        debug: console.debug.bind(console),
+        warn: console.warn.bind(console),
+        error: console.error.bind(console),
+        info: console.info.bind(console)
+      } as any;
+    }
+    
     // Load environment variables from .env files
     this.loadEnvironment();
   }
@@ -65,11 +78,15 @@ export class EnvManager {
             this.env.set(key.trim(), value);
           }
         }
+      }      if (this.logger) {
+        this.logger.debug(`Loaded environment from ${filePath}`, { envFile: filePath });
       }
-
-      this.logger.debug(`Loaded environment from ${filePath}`, { envFile: filePath });
     } catch (error) {
-      this.logger.warn(`Failed to load environment file ${filePath}`, { error: error instanceof Error ? error.message : String(error) });
+      if (this.logger) {
+        this.logger.warn(`Failed to load environment file ${filePath}`, { error: error instanceof Error ? error.message : String(error) });
+      } else {
+        console.warn(`Failed to load environment file ${filePath}:`, error instanceof Error ? error.message : String(error));
+      }
     }
   }
 

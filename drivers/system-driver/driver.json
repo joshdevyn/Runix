@@ -1,31 +1,62 @@
 {
   "id": "system-driver",
   "name": "SystemDriver",
-  "description": "System-level operations driver for file I/O and process management",
-  "version": "1.0.0",
+  "description": "Enhanced system driver with UI automation capabilities for desktop interaction",
+  "version": "2.0.0",
   "author": "Runix Team",
   "license": "MIT",
-  "executable": "index.js",
+  "executable": "SystemDriver.exe",
   "protocol": "websocket",
   "transport": "websocket",
   "features": [
     "execute",
     "introspection",
-    "health-check"
+    "health-check",
+    "ui-automation",
+    "screen-capture",
+    "mouse-control",
+    "keyboard-control"
   ],
   "actions": [
     "createFile",
     "readFile",
-    "writeFile", 
+    "writeFile",
     "deleteFile",
     "executeCommand",
     "startProcess",
     "killProcess",
-    "listProcesses"
+    "listProcesses",
+    "takeScreenshot",
+    "clickAt",
+    "doubleClickAt",
+    "rightClickAt",
+    "typeText",
+    "pressKey",
+    "moveMouse",
+    "drag",
+    "scroll",
+    "getMousePosition",
+    "getScreenSize",
+    "captureRegion",
+    "findColorAt",
+    "waitForColor"
   ],
+  "dependencies": {
+    "robotjs": "^0.6.0",
+    "screenshot-desktop": "^1.12.7"
+  },
   "config": {
     "workingDirectory": ".",
-    "allowedPaths": ["."],
-    "timeout": 30000
+    "allowedPaths": [
+      "."
+    ],
+    "timeout": 30000,
+    "screenshotDir": "./screenshots",
+    "uiAutomation": {
+      "mouseMoveDelay": 100,
+      "clickDelay": 50,
+      "typeDelay": 10,
+      "doubleClickSpeed": 300
+    }
   }
 }

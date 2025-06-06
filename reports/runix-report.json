@@ -1,113 +1,76 @@
 {
-  "timestamp": "2025-06-05T01:08:04.170Z",
+  "timestamp": "2025-06-06T23:46:11.463Z",
   "results": [
     {
-      "success": false,
-      "step": "I echo the message \"Hello Runix!\"",
-      "error": {
-        "name": "StepExecutionError",
-        "message": "Step execution failed: No matching step found: \"I echo the message \"Hello Runix!\"\"",
-        "errorCode": "STEP_EXECUTION_ERROR",
-        "context": {
-          "operation": "step_execution",
-          "traceId": "e4a763uf",
-          "stepText": "No matching step found: \"I echo the message \"Hello Runix!\"\"",
-          "timestamp": "2025-06-05T01:08:06.904Z",
-          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I echo the message \"Hello Runix!\"\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at C:\\snapshot\\_Runix\\dist\\index.js\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)"
-        }
+      "success": true,
+      "step": "I create file \"automation-log.txt\" with content \"Starting multi-driver workflow at $(date)\"",
+      "data": {
+        "path": "C:\\_Runix\\automation-log.txt",
+        "size": 41
       },
-      "timestamp": "2025-06-05T01:08:06.905Z"
+      "duration": 4,
+      "timestamp": "2025-06-06T23:46:14.521Z"
     },
     {
       "success": false,
-      "step": "I add 15 and 25",
-      "error": {
-        "name": "StepExecutionError",
-        "message": "Step execution failed: No matching step found: \"I add 15 and 25\"",
-        "errorCode": "STEP_EXECUTION_ERROR",
-        "context": {
-          "operation": "step_execution",
-          "traceId": "dhonzjxc",
-          "stepText": "No matching step found: \"I add 15 and 25\"",
-          "timestamp": "2025-06-05T01:08:06.907Z",
-          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I add 15 and 25\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async C:\\snapshot\\_Runix\\dist\\index.js"
-        }
-      },
-      "timestamp": "2025-06-05T01:08:06.907Z"
+      "step": "I create file \"test-config.json\" with content '{\"environment\":\"demo\",\"version\":\"1.0\"}'",
+      "error": {},
+      "timestamp": "2025-06-06T23:46:14.525Z"
     },
     {
       "success": false,
-      "step": "I wait for 500 milliseconds",
+      "step": "I read file \"test-config.json\"",
       "error": {
         "name": "StepExecutionError",
-        "message": "Step execution failed: No matching step found: \"I wait for 500 milliseconds\"",
-        "errorCode": "STEP_EXECUTION_ERROR",
         "context": {
-          "operation": "step_execution",
-          "traceId": "trxsv2lx",
-          "stepText": "No matching step found: \"I wait for 500 milliseconds\"",
-          "timestamp": "2025-06-05T01:08:06.909Z",
-          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I wait for 500 milliseconds\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async C:\\snapshot\\_Runix\\dist\\index.js"
-        }
+          "operation": "driver_action_execution",
+          "traceId": "yps9rll0",
+          "driverId": "system-driver"
+        },
+        "cause": {},
+        "type": "STEP_EXECUTION_ERROR"
       },
-      "timestamp": "2025-06-05T01:08:06.910Z"
+      "timestamp": "2025-06-06T23:46:14.530Z"
     },
     {
       "success": false,
-      "step": "I echo the message \"Starting sequence\"",
-      "error": {
-        "name": "StepExecutionError",
-        "message": "Step execution failed: No matching step found: \"I echo the message \"Starting sequence\"\"",
-        "errorCode": "STEP_EXECUTION_ERROR",
-        "context": {
-          "operation": "step_execution",
-          "traceId": "9slqf7vg",
-          "stepText": "No matching step found: \"I echo the message \"Starting sequence\"\"",
-          "timestamp": "2025-06-05T01:08:06.912Z",
-          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I echo the message \"Starting sequence\"\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async C:\\snapshot\\_Runix\\dist\\index.js"
-        }
-      },
-      "timestamp": "2025-06-05T01:08:06.912Z"
+      "step": "I open the browser at \"https://httpbin.org/forms/post\"",
+      "error": {},
+      "timestamp": "2025-06-06T23:46:14.533Z"
     },
     {
       "success": false,
-      "step": "I attempt an invalid operation",
-      "error": {
-        "name": "StepExecutionError",
-        "message": "Step execution failed: No matching step found: \"I attempt an invalid operation\"",
-        "errorCode": "STEP_EXECUTION_ERROR",
-        "context": {
-          "operation": "step_execution",
-          "traceId": "58s6prsa",
-          "stepText": "No matching step found: \"I attempt an invalid operation\"",
-          "timestamp": "2025-06-05T01:08:06.914Z",
-          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I attempt an invalid operation\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async C:\\snapshot\\_Runix\\dist\\index.js"
-        }
+      "step": "I analyze intent \"Create a file, open a website, and take a screenshot\"",
+      "error": {},
+      "timestamp": "2025-06-06T23:46:14.535Z"
+    },
+    {
+      "success": true,
+      "step": "I create file \"test-data.txt\" with content \"RUNIX AUTOMATION TEST\"",
+      "data": {
+        "path": "C:\\_Runix\\test-data.txt",
+        "size": 21
       },
-      "timestamp": "2025-06-05T01:08:06.915Z"
+      "duration": 3,
+      "timestamp": "2025-06-06T23:46:14.541Z"
     },
     {
       "success": false,
-      "step": "I perform multiple quick operations:",
-      "error": {
-        "name": "StepExecutionError",
-        "message": "Step execution failed: No matching step found: \"I perform multiple quick operations:\"",
-        "errorCode": "STEP_EXECUTION_ERROR",
-        "context": {
-          "operation": "step_execution",
-          "traceId": "xifwh800",
-          "stepText": "No matching step found: \"I perform multiple quick operations:\"",
-          "timestamp": "2025-06-05T01:08:06.917Z",
-          "stackTrace": "StepExecutionError: Step execution failed: No matching step found: \"I perform multiple quick operations:\"\n    at RunixEngine.executeStep (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at RunixEngine.runFeature (C:\\snapshot\\_Runix\\dist\\core\\engine.js)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async C:\\snapshot\\_Runix\\dist\\index.js"
-        }
-      },
-      "timestamp": "2025-06-05T01:08:06.918Z"
+      "step": "I take a screenshot \"desktop-state.png\"",
+      "error": {},
+      "timestamp": "2025-06-06T23:46:14.543Z"
+    },
+    {
+      "success": false,
+      "step": "I create file \"shared-data.json\" with content '{\"message\":\"Hello from System Driver\"}'",
+      "error": {},
+      "timestamp": "2025-06-06T23:46:14.545Z"
     }
   ],
   "summary": {
-    "total": 6,
-    "passed": 0,
+    "total": 8,
+    "passed": 2,
     "failed": 6,
-    "duration": 2749
+    "duration": 3084
   }
 }

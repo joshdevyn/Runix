@@ -1,10 +1,11 @@
 {
+  "id": "example-driver",
   "name": "ExampleDriver",
   "description": "Example driver for testing",
   "version": "1.0.0",
   "author": "Runix Team",
   "license": "MIT",
-  "executable": "ExampleDriver.exe",
+  "executable": "index.js",
   "protocol": "websocket",
   "transport": "websocket",
   "features": [
