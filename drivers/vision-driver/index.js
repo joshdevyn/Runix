@@ -41,11 +41,21 @@ const logger = createDriverLogger();
 
 logger.log(`Vision Driver starting on port ${port}`);
 
-// Vision processing
+// Vision processing configuration
 let config = {
   ocrLanguage: 'eng',
   confidenceThreshold: 0.6,
-  tempDir: './temp'
+  tempDir: './temp',
+  providers: {
+    primary: 'tesseract',
+    fallback: 'openai'
+  },
+  openai: {
+    enabled: true,
+    model: 'gpt-4o',
+    maxTokens: 2000,
+    temperature: 0.1
+  }
 };
 
 // Try to load Tesseract.js for OCR
@@ -55,6 +65,33 @@ try {
   logger.log('Tesseract.js loaded successfully');
 } catch (err) {
   logger.log('Tesseract.js not available, using mock OCR');
+}
+
+// Try to load OpenAI for vision analysis
+let OpenAI = null;
+try {
+  OpenAI = require('openai');
+  logger.log('OpenAI library loaded successfully');
+} catch (err) {
+  logger.log('OpenAI library not available, using fallback');
+}
+
+// Load environment variables
+try {
+  require('dotenv').config();
+} catch (err) {
+  logger.log('dotenv not available, using system environment');
+}
+
+// Initialize OpenAI client if available
+let openaiClient = null;
+if (OpenAI && process.env.OPENAI_API_KEY) {
+  openaiClient = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+  });
+  logger.log('OpenAI client initialized');
+} else {
+  logger.log('OpenAI not configured, using Tesseract only');
 }
 
 // Create HTTP server and WebSocket server
@@ -260,8 +297,186 @@ function mockOCR(imageBuffer) {
         bounds: { x: 50, y: 150, width: 80, height: 20 }
       }
     ],
-    confidence: 0.91
+    confidence: 0.91,
+    method: 'mock-ocr'
   };
+}
+
+// OpenAI Vision analysis
+async function analyzeWithOpenAI(base64Image, analysisType = 'general') {
+  if (!openaiClient) {
+    throw new Error('OpenAI not configured');
+  }
+
+  logger.log(`Starting OpenAI vision analysis: ${analysisType}`);
+
+  let prompt;
+  let expectedStructure;
+
+  switch (analysisType) {
+    case 'ocr':
+      prompt = 'Extract all text visible in this image. Return the result in JSON format with the structure: {"fullText": "all text concatenated", "textBlocks": [{"text": "individual text", "bounds": {"x": 0, "y": 0, "width": 100, "height": 20}, "confidence": 0.95}]}';
+      expectedStructure = { fullText: '', textBlocks: [] };
+      break;
+    
+    case 'ui':
+      prompt = 'Analyze this screenshot and identify all interactive UI elements (buttons, input fields, links, etc.). Also extract any visible text. Return the result in JSON format: {"elements": [{"type": "button", "label": "...", "bounds": {"x": 0, "y": 0, "width": 100, "height": 30}, "confidence": 0.95}], "textBlocks": [{"text": "...", "bounds": {"x": 0, "y": 0, "width": 100, "height": 20}, "confidence": 0.95}], "totalElements": 5}';
+      expectedStructure = { elements: [], textBlocks: [], totalElements: 0 };
+      break;
+
+    case 'computer_use':
+      prompt = 'Analyze this screenshot for computer automation. Identify all interactive elements and provide detailed information for automated actions. Return JSON: {"screen_analysis": "detailed description", "interactive_elements": [{"type": "button", "label": "...", "bounds": {"x": 0, "y": 0, "width": 100, "height": 30}, "action_hint": "click"}], "text_elements": [{"text": "...", "bounds": {"x": 0, "y": 0, "width": 100, "height": 20}}], "possible_actions": ["click button X", "type in field Y"]}';
+      expectedStructure = { screen_analysis: '', interactive_elements: [], text_elements: [], possible_actions: [] };
+      break;
+
+    case 'general':
+    default:
+      prompt = 'Analyze this image and describe what you see. Identify any objects, text, or UI elements. Return JSON: {"description": "detailed description", "identified_objects": [{"name": "object", "bounds": {"x": 0, "y": 0, "width": 100, "height": 30}, "confidence": 0.95}], "identified_text": [{"text": "...", "bounds": {"x": 0, "y": 0, "width": 100, "height": 20}}]}';
+      expectedStructure = { description: '', identified_objects: [], identified_text: [] };
+      break;
+  }
+
+  try {
+    const response = await openaiClient.chat.completions.create({
+      model: config.openai.model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: prompt
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: `data:image/png;base64,${base64Image}`
+              }
+            }
+          ]
+        }
+      ],
+      max_tokens: config.openai.maxTokens,
+      temperature: config.openai.temperature
+    });
+
+    const content = response.choices[0]?.message?.content || '{}';
+    
+    let result;
+    try {
+      result = JSON.parse(content);
+    } catch (parseError) {
+      // Try to extract JSON from the response if parsing fails
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        result = JSON.parse(jsonMatch[0]);
+      } else {
+        logger.error('Failed to parse OpenAI response as JSON');
+        result = expectedStructure;
+        result.error = 'Failed to parse response';
+        result.rawResponse = content;
+      }
+    }
+
+    // Add metadata
+    result.method = 'openai';
+    result.model = response.model;
+    result.usage = response.usage;
+
+    logger.log(`OpenAI vision analysis completed: ${analysisType}`);
+    return result;
+
+  } catch (error) {
+    logger.error('OpenAI vision analysis failed:', error);
+    throw error;
+  }
+}
+
+// Determine which provider to use for analysis
+async function analyzeScene(base64Image, analysisType = 'general', preferredProvider = null) {
+  const provider = preferredProvider || config.providers.primary;
+  
+  // Handle special computer use action
+  if (analysisType === 'computer_use' || provider === 'openai') {
+    if (openaiClient) {
+      return await analyzeWithOpenAI(base64Image, analysisType);
+    } else {
+      throw new Error('OpenAI provider requested but not available');
+    }
+  }
+
+  // For OCR, try Tesseract first, fallback to OpenAI
+  if (analysisType === 'ocr') {
+    try {
+      if (Tesseract && provider === 'tesseract') {
+        const buffer = base64ToBuffer(base64Image);
+        const result = await performOCR(buffer);
+        result.method = 'tesseract';
+        return result;
+      } else {
+        throw new Error('Tesseract not available');
+      }
+    } catch (err) {
+      logger.log('Tesseract OCR failed, trying OpenAI fallback');
+      if (openaiClient) {
+        return await analyzeWithOpenAI(base64Image, 'ocr');
+      } else {
+        logger.log('OpenAI not available, using mock OCR');
+        const buffer = base64ToBuffer(base64Image);
+        return mockOCR(buffer);
+      }
+    }
+  }
+
+  // For UI detection, prefer OpenAI if available
+  if (analysisType === 'ui') {
+    if (openaiClient && (provider === 'openai' || config.providers.primary === 'openai')) {
+      return await analyzeWithOpenAI(base64Image, 'ui');
+    } else {
+      // Fallback to local UI detection with OCR
+      const buffer = base64ToBuffer(base64Image);
+      let textData;
+      try {
+        textData = await performOCR(buffer);
+      } catch (err) {
+        textData = mockOCR(buffer);
+      }
+      
+      const elements = detectUI(buffer, textData.textBlocks);
+      return {
+        elements: elements,
+        textBlocks: textData.textBlocks,
+        totalElements: elements.length,
+        method: 'local-ui-detection'
+      };
+    }
+  }
+
+  // For general analysis, prefer OpenAI
+  if (openaiClient) {
+    return await analyzeWithOpenAI(base64Image, analysisType);
+  } else {
+    // Basic fallback analysis
+    const buffer = base64ToBuffer(base64Image);
+    let textData;
+    try {
+      textData = await performOCR(buffer);
+    } catch (err) {
+      textData = mockOCR(buffer);
+    }
+    
+    const elements = detectUI(buffer, textData.textBlocks);
+    return {
+      description: `Scene contains ${elements.length} UI elements and ${textData.textBlocks.length} text blocks`,
+      identified_objects: elements.map(el => ({
+        name: el.type,
+        bounds: el.bounds,
+        confidence: el.confidence
+      })),
+      identified_text: textData.textBlocks,
+      method: 'local-analysis'
+    };
+  }
 }
 
 // Mock UI detection
@@ -323,57 +538,45 @@ async function handleExecute(id, action, args) {
   logger.log(`Executing action: ${action}`, { argsLength: args.length });
   
   try {
-    switch (action) {
-      case 'extractText':
+    switch (action) {      case 'extractText':
         const base64Image = args[0];
         if (!base64Image) {
           return sendErrorResponse(id, 400, 'Base64 image data required');
         }
         
-        const imageBuffer = base64ToBuffer(base64Image);
-        logger.log('Processing image for OCR', { size: imageBuffer.length });
+        logger.log('Processing image for OCR');
         
-        let ocrResult;
         try {
-          ocrResult = await performOCR(imageBuffer);
+          const ocrResult = await analyzeScene(base64Image, 'ocr');
+          return sendSuccessResponse(id, {
+            fullText: ocrResult.fullText,
+            textBlocks: ocrResult.textBlocks,
+            confidence: ocrResult.confidence || 0.8,
+            method: ocrResult.method || 'unknown'
+          });
         } catch (err) {
-          logger.log('OCR failed, using mock OCR:', err.message);
-          ocrResult = mockOCR(imageBuffer);
-        }
-        
-        return sendSuccessResponse(id, {
-          fullText: ocrResult.fullText,
-          textBlocks: ocrResult.textBlocks,
-          confidence: ocrResult.confidence,
-          method: Tesseract ? 'tesseract' : 'mock'
-        });
-
-      case 'detectUI':
+          logger.error('OCR analysis failed:', err);
+          return sendErrorResponse(id, 500, `OCR analysis failed: ${err.message}`);
+        }      case 'detectUI':
         const uiBase64Image = args[0];
         if (!uiBase64Image) {
           return sendErrorResponse(id, 400, 'Base64 image data required');
         }
         
-        const uiImageBuffer = base64ToBuffer(uiBase64Image);
-        logger.log('Processing image for UI detection', { size: uiImageBuffer.length });
+        logger.log('Processing image for UI detection');
         
-        // First extract text, then detect UI elements
-        let textData;
         try {
-          textData = await performOCR(uiImageBuffer);
+          const uiResult = await analyzeScene(uiBase64Image, 'ui');
+          return sendSuccessResponse(id, {
+            elements: uiResult.elements || [],
+            textBlocks: uiResult.textBlocks || [],
+            totalElements: uiResult.totalElements || (uiResult.elements ? uiResult.elements.length : 0),
+            method: uiResult.method || 'unknown'
+          });
         } catch (err) {
-          logger.log('OCR failed for UI detection, using mock:', err.message);
-          textData = mockOCR(uiImageBuffer);
+          logger.error('UI detection failed:', err);
+          return sendErrorResponse(id, 500, `UI detection failed: ${err.message}`);
         }
-        
-        const uiElements = detectUI(uiImageBuffer, textData.textBlocks);
-        
-        return sendSuccessResponse(id, {
-          elements: uiElements,
-          textBlocks: textData.textBlocks,
-          totalElements: uiElements.length,
-          method: 'combined-ocr-ui'
-        });
 
       case 'findImage':
         const targetImage = args[0]; // Base64 of template image
@@ -391,35 +594,71 @@ async function handleExecute(id, action, args) {
           confidence: 0.75,
           location: { x: 150, y: 200, width: 80, height: 30 },
           method: 'mock-template-matching'
-        });
-
-      case 'analyzeScene':
+        });      case 'analyzeScene':
         const sceneImage = args[0];
+        const analysisType = args[1] || 'general'; // Allow specifying analysis type
         if (!sceneImage) {
           return sendErrorResponse(id, 400, 'Scene image data required');
         }
         
-        const sceneBuffer = base64ToBuffer(sceneImage);
-        logger.log('Analyzing scene', { size: sceneBuffer.length });
+        logger.log(`Analyzing scene with type: ${analysisType}`);
         
-        // Combine OCR and UI detection for comprehensive scene analysis
-        let sceneTextData;
         try {
-          sceneTextData = await performOCR(sceneBuffer);
-        } catch (err) {
-          sceneTextData = mockOCR(sceneBuffer);
+          const sceneResult = await analyzeScene(sceneImage, analysisType);
+          
+          // Normalize the response format based on analysis type
+          let responseData;
+          if (analysisType === 'computer_use') {
+            responseData = {
+              scene: {
+                analysis: sceneResult.screen_analysis || sceneResult.description || 'Scene analyzed',
+                interactive_elements: sceneResult.interactive_elements || [],
+                text_elements: sceneResult.text_elements || sceneResult.textBlocks || [],
+                possible_actions: sceneResult.possible_actions || [],
+                method: sceneResult.method || 'unknown'
+              }
+            };
+          } else {
+            responseData = {
+              scene: {
+                description: sceneResult.description || sceneResult.screen_analysis || 'Scene analyzed',
+                text: sceneResult.fullText || '',
+                textBlocks: sceneResult.textBlocks || sceneResult.text_elements || [],
+                uiElements: sceneResult.elements || sceneResult.interactive_elements || [],
+                objects: sceneResult.identified_objects || [],
+                summary: sceneResult.description || `Scene contains ${(sceneResult.elements || []).length} UI elements`,
+                method: sceneResult.method || 'unknown'
+              }
+            };
+          }
+          
+          return sendSuccessResponse(id, responseData);        } catch (err) {
+          logger.error('Scene analysis failed:', err);
+          return sendErrorResponse(id, 500, `Scene analysis failed: ${err.message}`);
+        }
+
+      case 'analyzeForComputerUse':
+        const computerUseImage = args[0];
+        if (!computerUseImage) {
+          return sendErrorResponse(id, 400, 'Image data required for computer use analysis');
         }
         
-        const sceneElements = detectUI(sceneBuffer, sceneTextData.textBlocks);
+        logger.log('Analyzing scene for computer automation');
         
-        return sendSuccessResponse(id, {
-          scene: {
-            text: sceneTextData.fullText,
-            textBlocks: sceneTextData.textBlocks,
-            uiElements: sceneElements,
-            summary: `Scene contains ${sceneElements.length} UI elements and ${sceneTextData.textBlocks.length} text blocks`
-          }
-        });
+        try {
+          const computerUseResult = await analyzeScene(computerUseImage, 'computer_use');
+          return sendSuccessResponse(id, {
+            screen_analysis: computerUseResult.screen_analysis || 'Scene analyzed for automation',
+            interactive_elements: computerUseResult.interactive_elements || [],
+            text_elements: computerUseResult.text_elements || [],
+            possible_actions: computerUseResult.possible_actions || [],
+            method: computerUseResult.method || 'openai',
+            model: computerUseResult.model || config.openai.model
+          });
+        } catch (err) {
+          logger.error('Computer use analysis failed:', err);
+          return sendErrorResponse(id, 500, `Computer use analysis failed: ${err.message}`);
+        }
 
       case 'introspect':
         const introspectParams = args[0] || {};
@@ -472,13 +711,23 @@ function handleIntrospect(id, type) {
               { name: "template", type: "base64", description: "Template image to find", required: true },
               { name: "screenshot", type: "base64", description: "Screenshot to search in", required: true }
             ]
-          },
-          {
+          },          {
             id: "analyze-scene",
             pattern: "analyze scene in screenshot",
             description: "Comprehensive analysis of a screenshot including text and UI elements",
             action: "analyzeScene",
-            examples: ["analyze scene in screenshot"],
+            examples: ["analyze scene in screenshot", "analyze scene for ui detection"],
+            parameters: [
+              { name: "image", type: "base64", description: "Base64 encoded screenshot", required: true },
+              { name: "analysisType", type: "string", description: "Type of analysis: general, ocr, ui, computer_use", required: false, default: "general" }
+            ]
+          },
+          {
+            id: "analyze-computer-use",
+            pattern: "analyze scene for computer automation",
+            description: "Specialized analysis for computer automation and agent interactions",
+            action: "analyzeForComputerUse",
+            examples: ["analyze scene for computer automation", "analyze for agent actions"],
             parameters: [
               { name: "image", type: "base64", description: "Base64 encoded screenshot", required: true }
             ]
@@ -490,14 +739,15 @@ function handleIntrospect(id, type) {
     return {
       id,
       type: 'response',
-      result: {
-        capabilities: {
+      result: {        capabilities: {
           name: 'VisionDriver',
           version: '1.0.0',
-          description: 'Computer vision driver for OCR and UI detection',
+          description: 'Computer vision driver for OCR and UI detection with GPT-4o support',
           author: 'Runix Team',
-          supportedActions: ['extractText', 'detectUI', 'findImage', 'analyzeScene'],
-          features: ['execute', 'introspection']
+          supportedActions: ['extractText', 'detectUI', 'findImage', 'analyzeScene', 'analyzeForComputerUse'],
+          features: ['execute', 'introspection', 'openai-vision', 'computer-use-analysis'],
+          providers: ['tesseract', 'openai-gpt4o'],
+          models: config.openai.enabled ? [config.openai.model] : []
         }
       }
     };

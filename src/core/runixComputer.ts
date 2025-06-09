@@ -3,6 +3,12 @@ import { DriverInstance } from '../drivers/driver.interface';
 import { Logger } from '../utils/logger';
 
 /**
+ * NOTE: This file contains Computer interface implementation that is currently unused.
+ * It provides a unified interface adapter for all Runix drivers following OpenAI CUA patterns.
+ * Keep for future direct Computer interface usage.
+ */
+
+/**
  * Runix Computer Implementation
  * Adapts Runix drivers to the Computer interface pattern
  */

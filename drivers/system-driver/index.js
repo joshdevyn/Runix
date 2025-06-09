@@ -12,14 +12,15 @@ const port = parseInt(process.env.RUNIX_DRIVER_PORT || '9002', 10);
 const manifest = require('./driver.json');
 
 // Try to load system automation libraries
-let robot = null;
+let nutjs = null;
 let screenshot = null;
 try {
-  robot = require('robotjs');
+  const { mouse, keyboard, screen, Button } = require('@nut-tree-fork/nut-js');
+  nutjs = { mouse, keyboard, screen, Button };
   screenshot = require('screenshot-desktop');
-  console.log('[SystemDriver] UI automation libraries loaded successfully');
+  console.log('[SystemDriver] Modern UI automation libraries loaded successfully');
 } catch (err) {
-  console.log('[SystemDriver] UI automation libraries not available, using mock implementation');
+  console.log('[SystemDriver] UI automation libraries not available:', err.message);
 }
 
 // Create structured logger for driver processes
@@ -443,43 +444,35 @@ async function handleExecute(id, action, args) {
 async function handleTakeScreenshot(id, args) {
   const filename = args[0] || `screenshot-${Date.now()}.png`;
   const filepath = path.join(config.screenshotDir, filename);
+  
+  if (!screenshot) {
+    return sendErrorResponse(id, 500, 'Screenshot library not available. Please install screenshot-desktop package.');
+  }
 
-  if (screenshot) {
-    try {
-      logger.log('Attempting to take screenshot...');
-      
-      // Ensure the directory exists
-      await fs.mkdir(config.screenshotDir, { recursive: true });
-      logger.log(`Screenshot directory verified: ${config.screenshotDir}`);
-      
-      const imageBuffer = await screenshot();
-      await fs.writeFile(filepath, imageBuffer);
-      logger.log(`Screenshot saved: ${filepath}`);
-      
-      // Convert to base64 for AI processing
-      const base64 = imageBuffer.toString('base64');
-      
+  try {
+    logger.log('Taking screenshot with modern libraries...');
+    
+    // Ensure the directory exists
+    await fs.mkdir(config.screenshotDir, { recursive: true });
+    logger.log(`Screenshot directory verified: ${config.screenshotDir}`);
+    
+    const imageBuffer = await screenshot();
+      // Save the screenshot directly
+    await fs.writeFile(filepath, imageBuffer);
+    logger.log(`Screenshot saved: ${filepath}, size: ${imageBuffer.length} bytes`);
+    
+    // Convert to base64 for AI processing
+    const base64 = imageBuffer.toString('base64');
       return sendSuccessResponse(id, {
-        filename: filename,
-        path: filepath,
-        base64: base64,
-        size: imageBuffer.length
-      });
-    } catch (err) {
-      logger.error('Error taking screenshot:', err);
-      logger.error('Error stack:', err.stack); // Log the full stack trace
-      return sendErrorResponse(id, 500, `Failed to take screenshot: ${err.message}`);
-    }
-  } else {
-    // Mock implementation
-    logger.log('Using mock screenshot implementation');
-    const mockBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-    return sendSuccessResponse(id, {
       filename: filename,
       path: filepath,
-      base64: mockBase64,
-      mock: true
+      base64: base64,
+      size: imageBuffer.length
     });
+  } catch (err) {
+    logger.error('Error taking screenshot:', err);
+    logger.error('Error stack:', err.stack);
+    return sendErrorResponse(id, 500, `Failed to take screenshot: ${err.message}`);
   }
 }
 
@@ -487,56 +480,68 @@ async function handleClickAt(id, args) {
   const x = parseInt(args[0]);
   const y = parseInt(args[1]);
   const button = args[2] || 'left';
+  
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
 
-  if (robot) {
+  try {
     await new Promise(resolve => setTimeout(resolve, config.uiAutomation.mouseMoveDelay));
-    robot.moveMouse(x, y);
-    await new Promise(resolve => setTimeout(resolve, config.uiAutomation.clickDelay));
-    robot.mouseClick(button);
     
-    logger.log(`Clicked at (${x}, ${y}) with ${button} button`);
+    // Move mouse to position
+    await nutjs.mouse.setPosition({ x, y });
+    await new Promise(resolve => setTimeout(resolve, config.uiAutomation.clickDelay));
+    
+    // Click with specified button
+    const buttonMap = {
+      'left': nutjs.Button.LEFT,
+      'right': nutjs.Button.RIGHT,
+      'middle': nutjs.Button.MIDDLE
+    };
+    
+    const nutButton = buttonMap[button] || nutjs.Button.LEFT;
+    await nutjs.mouse.click(nutButton);
+    
+    logger.log(`Clicked at (${x}, ${y}) with ${button} button using nut-js`);
     return sendSuccessResponse(id, {
       x: x,
       y: y,
       button: button,
       action: 'clicked'
     });
-  } else {
-    logger.log(`Mock click at (${x}, ${y}) with ${button} button`);
-    return sendSuccessResponse(id, {
-      x: x,
-      y: y,
-      button: button,
-      action: 'clicked',
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Error clicking:', err);
+    return sendErrorResponse(id, 500, `Failed to click: ${err.message}`);
   }
 }
 
 async function handleDoubleClickAt(id, args) {
   const x = parseInt(args[0]);
   const y = parseInt(args[1]);
+  
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
 
-  if (robot) {
+  try {
     await new Promise(resolve => setTimeout(resolve, config.uiAutomation.mouseMoveDelay));
-    robot.moveMouse(x, y);
-    await new Promise(resolve => setTimeout(resolve, config.uiAutomation.clickDelay));
-    robot.mouseClick('left', true); // double click
     
-    logger.log(`Double-clicked at (${x}, ${y})`);
+    // Move mouse to position
+    await nutjs.mouse.setPosition({ x, y });
+    await new Promise(resolve => setTimeout(resolve, config.uiAutomation.clickDelay));
+    
+    // Double click
+    await nutjs.mouse.doubleClick(nutjs.Button.LEFT);
+    
+    logger.log(`Double-clicked at (${x}, ${y}) using nut-js`);
     return sendSuccessResponse(id, {
       x: x,
       y: y,
       action: 'double-clicked'
     });
-  } else {
-    logger.log(`Mock double-click at (${x}, ${y})`);
-    return sendSuccessResponse(id, {
-      x: x,
-      y: y,
-      action: 'double-clicked',
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Error double-clicking:', err);
+    return sendErrorResponse(id, 500, `Failed to double-click: ${err.message}`);
   }
 }
 
@@ -544,11 +549,15 @@ async function handleRightClickAt(id, args) {
   const x = parseInt(args[0]);
   const y = parseInt(args[1]);
 
-  if (robot) {
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
+
+  try {
     await new Promise(resolve => setTimeout(resolve, config.uiAutomation.mouseMoveDelay));
-    robot.moveMouse(x, y);
+    await nutjs.mouse.setPosition({ x, y });
     await new Promise(resolve => setTimeout(resolve, config.uiAutomation.clickDelay));
-    robot.mouseClick('right');
+    await nutjs.mouse.click(nutjs.Button.RIGHT);
     
     logger.log(`Right-clicked at (${x}, ${y})`);
     return sendSuccessResponse(id, {
@@ -556,23 +565,28 @@ async function handleRightClickAt(id, args) {
       y: y,
       action: 'right-clicked'
     });
-  } else {
-    logger.log(`Mock right-click at (${x}, ${y})`);
-    return sendSuccessResponse(id, {
-      x: x,
-      y: y,
-      action: 'right-clicked',
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to right-click:', err);
+    return sendErrorResponse(id, 500, `Failed to right-click: ${err.message}`);
   }
 }
 
 async function handleTypeText(id, args) {
   const text = args[0];
   const delay = parseInt(args[1]) || config.uiAutomation.typeDelay;
+  
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
 
-  if (robot) {
-    robot.typeStringDelayed(text, delay);
+  try {
+    // Nut.js doesn't have typeStringDelayed, so we'll simulate it
+    for (const char of text) {
+      await nutjs.keyboard.type(char);
+      if (delay > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
     
     logger.log(`Typed text: "${text}" with delay ${delay}ms`);
     return sendSuccessResponse(id, {
@@ -580,14 +594,9 @@ async function handleTypeText(id, args) {
       delay: delay,
       action: 'typed'
     });
-  } else {
-    logger.log(`Mock type text: "${text}"`);
-    return sendSuccessResponse(id, {
-      text: text,
-      delay: delay,
-      action: 'typed',
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to type text:', err);
+    return sendErrorResponse(id, 500, `Failed to type text: ${err.message}`);
   }
 }
 
@@ -595,11 +604,27 @@ async function handlePressKey(id, args) {
   const key = args[0];
   const modifiers = args[1] || [];
 
-  if (robot) {
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
+
+  try {
     if (modifiers.length > 0) {
-      robot.keyTap(key, modifiers);
+      // Convert modifiers to nut-js format and press key combination
+      const nutjsModifiers = modifiers.map(mod => {
+        switch (mod.toLowerCase()) {
+          case 'ctrl':
+          case 'control': return nutjs.keyboard.Key.LeftControl;
+          case 'alt': return nutjs.keyboard.Key.LeftAlt;
+          case 'shift': return nutjs.keyboard.Key.LeftShift;
+          case 'meta':
+          case 'cmd': return nutjs.keyboard.Key.LeftCmd;
+          default: return mod;
+        }
+      });
+      await nutjs.keyboard.pressKey(nutjs.keyboard.Key[key] || key, ...nutjsModifiers);
     } else {
-      robot.keyTap(key);
+      await nutjs.keyboard.pressKey(nutjs.keyboard.Key[key] || key);
     }
     
     logger.log(`Pressed key: ${key}${modifiers.length ? ' with modifiers: ' + modifiers.join('+') : ''}`);
@@ -608,23 +633,22 @@ async function handlePressKey(id, args) {
       modifiers: modifiers,
       action: 'key-pressed'
     });
-  } else {
-    logger.log(`Mock key press: ${key}`);
-    return sendSuccessResponse(id, {
-      key: key,
-      modifiers: modifiers,
-      action: 'key-pressed',
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to press key:', err);
+    return sendErrorResponse(id, 500, `Failed to press key: ${err.message}`);
   }
 }
 
 async function handleMoveMouse(id, args) {
   const x = parseInt(args[0]);
   const y = parseInt(args[1]);
+  
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
 
-  if (robot) {
-    robot.moveMouse(x, y);
+  try {
+    await nutjs.mouse.setPosition({ x, y });
     
     logger.log(`Moved mouse to (${x}, ${y})`);
     return sendSuccessResponse(id, {
@@ -632,14 +656,9 @@ async function handleMoveMouse(id, args) {
       y: y,
       action: 'mouse-moved'
     });
-  } else {
-    logger.log(`Mock move mouse to (${x}, ${y})`);
-    return sendSuccessResponse(id, {
-      x: x,
-      y: y,
-      action: 'mouse-moved',
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to move mouse:', err);
+    return sendErrorResponse(id, 500, `Failed to move mouse: ${err.message}`);
   }
 }
 
@@ -649,12 +668,16 @@ async function handleDrag(id, args) {
   const endX = parseInt(args[2]);
   const endY = parseInt(args[3]);
 
-  if (robot) {
-    robot.moveMouse(startX, startY);
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
+
+  try {
+    await nutjs.mouse.setPosition({ x: startX, y: startY });
     await new Promise(resolve => setTimeout(resolve, config.uiAutomation.clickDelay));
-    robot.mouseToggle('down');
-    robot.dragMouse(endX, endY);
-    robot.mouseToggle('up');
+    await nutjs.mouse.pressButton(nutjs.Button.LEFT);
+    await nutjs.mouse.drag({ x: endX, y: endY });
+    await nutjs.mouse.releaseButton(nutjs.Button.LEFT);
     
     logger.log(`Dragged from (${startX}, ${startY}) to (${endX}, ${endY})`);
     return sendSuccessResponse(id, {
@@ -664,16 +687,9 @@ async function handleDrag(id, args) {
       endY: endY,
       action: 'dragged'
     });
-  } else {
-    logger.log(`Mock drag from (${startX}, ${startY}) to (${endX}, ${endY})`);
-    return sendSuccessResponse(id, {
-      startX: startX,
-      startY: startY,
-      endX: endX,
-      endY: endY,
-      action: 'dragged',
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to perform drag:', err);
+    return sendErrorResponse(id, 500, `Failed to drag: ${err.message}`);
   }
 }
 
@@ -683,10 +699,14 @@ async function handleScroll(id, args) {
   const scrollX = parseInt(args[2]) || 0;
   const scrollY = parseInt(args[3]) || -3; // Default scroll up
 
-  if (robot) {
-    robot.moveMouse(x, y);
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
+
+  try {
+    await nutjs.mouse.setPosition({ x, y });
     await new Promise(resolve => setTimeout(resolve, config.uiAutomation.clickDelay));
-    robot.scrollMouse(scrollX, scrollY);
+    await nutjs.mouse.scrollDown(Math.abs(scrollY));
     
     logger.log(`Scrolled at (${x}, ${y}) by (${scrollX}, ${scrollY})`);
     return sendSuccessResponse(id, {
@@ -696,54 +716,47 @@ async function handleScroll(id, args) {
       scrollY: scrollY,
       action: 'scrolled'
     });
-  } else {
-    logger.log(`Mock scroll at (${x}, ${y}) by (${scrollX}, ${scrollY})`);
-    return sendSuccessResponse(id, {
-      x: x,
-      y: y,
-      scrollX: scrollX,
-      scrollY: scrollY,
-      action: 'scrolled',
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to scroll:', err);
+    return sendErrorResponse(id, 500, `Failed to scroll: ${err.message}`);
   }
 }
 
 async function handleGetMousePosition(id, args) {
-  if (robot) {
-    const mouse = robot.getMousePos();
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
+
+  try {
+    const position = await nutjs.mouse.getPosition();
     
-    logger.log(`Current mouse position: (${mouse.x}, ${mouse.y})`);
+    logger.log(`Current mouse position: (${position.x}, ${position.y})`);
     return sendSuccessResponse(id, {
-      x: mouse.x,
-      y: mouse.y
+      x: position.x,
+      y: position.y
     });
-  } else {
-    logger.log('Mock mouse position: (500, 300)');
-    return sendSuccessResponse(id, {
-      x: 500,
-      y: 300,
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to get mouse position:', err);
+    return sendErrorResponse(id, 500, `Failed to get mouse position: ${err.message}`);
   }
 }
 
 async function handleGetScreenSize(id, args) {
-  if (robot) {
-    const screenSize = robot.getScreenSize();
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
+
+  try {
+    const screenSize = await nutjs.screen.size();
     
     logger.log(`Screen size: ${screenSize.width}x${screenSize.height}`);
     return sendSuccessResponse(id, {
       width: screenSize.width,
       height: screenSize.height
     });
-  } else {
-    logger.log('Mock screen size: 1920x1080');
-    return sendSuccessResponse(id, {
-      width: 1920,
-      height: 1080,
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to get screen size:', err);
+    return sendErrorResponse(id, 500, `Failed to get screen size: ${err.message}`);
   }
 }
 
@@ -754,15 +767,19 @@ async function handleCaptureRegion(id, args) {
   const height = parseInt(args[3]);
   const filename = args[4] || `region-${Date.now()}.png`;
 
-  if (robot) {
-    const bitmap = robot.screen.capture(x, y, width, height);
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
+
+  try {
     const filepath = path.join(config.screenshotDir, filename);
-    
     await fs.mkdir(config.screenshotDir, { recursive: true });
     
-    // Convert bitmap to PNG buffer (simplified - would need image library in real implementation)
-    const imageBuffer = Buffer.from(bitmap.image, 'binary');
-    await fs.writeFile(filepath, imageBuffer);
+    // Capture region using nut-js screen capture
+    const region = { left: x, top: y, width, height };    const image = await nutjs.screen.grabRegion(region);
+    
+    // Save the raw image data directly
+    await fs.writeFile(filepath, image.data);
     
     logger.log(`Captured region (${x}, ${y}, ${width}, ${height}) to ${filepath}`);
     return sendSuccessResponse(id, {
@@ -773,42 +790,34 @@ async function handleCaptureRegion(id, args) {
       filename: filename,
       path: filepath
     });
-  } else {
-    logger.log(`Mock capture region (${x}, ${y}, ${width}, ${height})`);
-    return sendSuccessResponse(id, {
-      x: x,
-      y: y,
-      width: width,
-      height: height,
-      filename: filename,
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to capture region:', err);
+    return sendErrorResponse(id, 500, `Failed to capture region: ${err.message}`);
   }
 }
 
 async function handleFindColorAt(id, args) {
   const x = parseInt(args[0]);
   const y = parseInt(args[1]);
+  
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
 
-  if (robot) {
-    const color = robot.getPixelColor(x, y);
+  try {
+    const color = await nutjs.screen.colorAt({ x, y });
+    const hexColor = `#${color.toString(16).padStart(6, '0')}`;
     
-    logger.log(`Color at (${x}, ${y}): ${color}`);
+    logger.log(`Color at (${x}, ${y}): ${hexColor}`);
     return sendSuccessResponse(id, {
       x: x,
       y: y,
       color: color,
-      hex: color
+      hex: hexColor
     });
-  } else {
-    logger.log(`Mock color at (${x}, ${y}): ffffff`);
-    return sendSuccessResponse(id, {
-      x: x,
-      y: y,
-      color: 'ffffff',
-      hex: 'ffffff',
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to get color at position:', err);
+    return sendErrorResponse(id, 500, `Failed to get color: ${err.message}`);
   }
 }
 
@@ -819,18 +828,24 @@ async function handleWaitForColor(id, args) {
   const timeout = parseInt(args[3]) || 5000;
   const interval = parseInt(args[4]) || 100;
 
-  if (robot) {
+  if (!nutjs) {
+    return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
+  }
+
+  try {
     const startTime = Date.now();
     
     while (Date.now() - startTime < timeout) {
-      const currentColor = robot.getPixelColor(x, y);
-      if (currentColor.toLowerCase() === expectedColor.toLowerCase()) {
+      const currentColor = await nutjs.screen.colorAt({ x, y });
+      const currentHex = `#${currentColor.toString(16).padStart(6, '0')}`;
+      
+      if (currentHex.toLowerCase() === expectedColor.toLowerCase()) {
         logger.log(`Found expected color ${expectedColor} at (${x}, ${y})`);
         return sendSuccessResponse(id, {
           x: x,
           y: y,
           expectedColor: expectedColor,
-          foundColor: currentColor,
+          foundColor: currentHex,
           found: true,
           waitTime: Date.now() - startTime
         });
@@ -847,15 +862,9 @@ async function handleWaitForColor(id, args) {
       timeout: true,
       waitTime: timeout
     });
-  } else {
-    logger.log(`Mock wait for color ${expectedColor} at (${x}, ${y})`);
-    return sendSuccessResponse(id, {
-      x: x,
-      y: y,
-      expectedColor: expectedColor,
-      found: true,
-      mock: true
-    });
+  } catch (err) {
+    logger.error('Failed to wait for color:', err);
+    return sendErrorResponse(id, 500, `Failed to wait for color: ${err.message}`);
   }
 }
 

@@ -2,6 +2,12 @@ import { Queue, Worker } from 'bullmq';
 import { SessionManager } from './sessionManager';
 import { BaseTask } from './task';
 
+/**
+ * NOTE: This file contains task scheduling functionality that is currently unused.
+ * It provides BullMQ-based background job processing capabilities.
+ * Keep for future distributed task execution features.
+ */
+
 const scenarioQueue = new Queue('scenarios');
 
 const scenarioWorker = new Worker('scenarios', async (job) => {

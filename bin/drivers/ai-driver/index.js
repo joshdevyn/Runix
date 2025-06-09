@@ -2,27 +2,39 @@ const WebSocket = require('ws');
 const http = require('http');
 const url = require('url');
 const path = require('path');
+const fs = require('fs');
 const OpenAI = require('openai');
 
-// Load .env from the root directory
-require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+// Load .env from multiple possible locations
+
+// Try multiple possible .env file locations
+const possibleEnvPaths = [
+  path.join(__dirname, '.env'),                    // Local .env in binary dir
+  path.join(__dirname, '../../.env'),              // Original Runix root
+  path.join(__dirname, '../../../.env'),           // From bin/drivers/ai-driver to root
+  path.join(process.cwd(), '.env'),                // Current working directory
+  'C:\\_Runix\\.env'                               // Absolute path as fallback
+];
 
 console.log('DEBUG: __dirname:', __dirname);
-console.log('DEBUG: env path:', path.join(__dirname, '../../.env'));
+console.log('DEBUG: process.cwd():', process.cwd());
+
+let envLoaded = false;
+for (const envPath of possibleEnvPaths) {
+  console.log('DEBUG: Trying env path:', envPath);
+  if (fs.existsSync(envPath)) {
+    console.log('DEBUG: Found .env file at:', envPath);
+    require('dotenv').config({ path: envPath });
+    envLoaded = true;
+    break;
+  }
+}
+
+if (!envLoaded) {
+  console.log('DEBUG: No .env file found in any of the attempted paths');
+}
+
 console.log('DEBUG: OPENAI_API_KEY from env:', process.env.OPENAI_API_KEY);
-
-// Get port from environment variable (assigned by engine) or use default for standalone
-const port = parseInt(process.env.RUNIX_DRIVER_PORT || '9001', 10);
-const manifest = require('./driver.json');
-
-// Initialize OpenAI client
-const apiKey = process.env.OPENAI_API_KEY || 'test_key';
-console.log('DEBUG: Final API key being used:', apiKey);
-logger.log('OpenAI API Key loaded', { keyPreview: apiKey ? apiKey.substring(0, 20) + '...' : 'NOT SET' });
-
-const openai = new OpenAI({
-  apiKey: apiKey,
-});
 
 // Create structured logger for driver processes
 function createDriverLogger() {
@@ -56,6 +68,19 @@ function createDriverLogger() {
 }
 
 const logger = createDriverLogger();
+
+// Get port from environment variable (assigned by engine) or use default for standalone
+const port = parseInt(process.env.RUNIX_DRIVER_PORT || '9001', 10);
+const manifest = require('./driver.json');
+
+// Initialize OpenAI client
+const apiKey = process.env.OPENAI_API_KEY || 'test_key';
+console.log('DEBUG: Final API key being used:', apiKey);
+logger.log('OpenAI API Key loaded', { keyPreview: apiKey ? apiKey.substring(0, 20) + '...' : 'NOT SET' });
+
+const openai = new OpenAI({
+  apiKey: apiKey,
+});
 
 logger.log(`AI Driver starting on port ${port}`);
 
@@ -219,19 +244,8 @@ async function handleExecute(id, action, args) {
         logger.error('OpenAI API error', { error: error.message });
         return sendErrorResponse(id, 500, `AI service error: ${error.message}`);
       }
-      
-    case 'agent':
-      return {
-        id,
-        type: 'response',
-        result: {
-          success: true,
-          data: {
-            response: `AI agent completed task: ${args[0]}`,
-            task: args[0]
-          }
-        }
-      };
+        case 'agent':      // Note: Agent mode is now handled by AgentDriver orchestration
+      return sendErrorResponse(id, 501, 'Agent mode is handled by AgentDriver. Use AgentDriver.execute("agent", [task]) instead.');
       
     case 'analyze':
       return {
@@ -311,6 +325,113 @@ async function handleExecute(id, action, args) {
           }
         }
       };
+      
+    case 'analyzeScreenAndDecide':
+      try {
+        const context = args[0];
+        if (!context || !context.task || !context.currentScreenshot) {
+          return sendErrorResponse(id, 400, 'Context with task and currentScreenshot is required');
+        }
+        
+        logger.log('Analyzing screenshot and making decision', { 
+          task: context.task, 
+          environment: context.environment,
+          hasScreenshot: !!context.currentScreenshot 
+        });
+        
+        // Create a comprehensive prompt for computer use decision making
+        const systemPrompt = `You are an AI agent that controls a computer to complete tasks. You can see screenshots and must decide what action to take next.
+
+Available actions:
+- click: Click at coordinates {"type": "click", "x": number, "y": number}
+- double_click: Double-click at coordinates {"type": "double_click", "x": number, "y": number}  
+- type: Type text {"type": "type", "text": "string"}
+- key: Press a key {"type": "key", "key": "Enter|Tab|Escape|etc"}
+- scroll: Scroll at position {"type": "scroll", "x": number, "y": number, "scrollY": number}
+- wait: Wait for changes {"type": "wait", "duration": number}
+- task_complete: Task is finished {"type": "task_complete"}
+
+Analyze the screenshot and respond with ONLY a JSON object containing:
+{
+  "reasoning": "Why you chose this action",
+  "action": {"type": "action_type", ...action_parameters},
+  "isComplete": false or true if task is done
+}
+
+Be precise with coordinates. Look carefully at the screenshot to understand the current state.`;
+
+        const userPrompt = `Task: ${context.task}
+
+Current environment: ${context.environment || 'desktop'}
+Display size: ${context.displaySize?.width || 1920}x${context.displaySize?.height || 1080}
+
+${context.iterationHistory?.length ? `Recent actions: ${JSON.stringify(context.iterationHistory.slice(-2))}` : 'No previous actions.'}
+
+What should I do next to complete this task? Respond with JSON only.`;
+
+        const messages = [
+          {
+            role: "system",
+            content: systemPrompt
+          },
+          {
+            role: "user", 
+            content: [
+              {
+                type: "text",
+                text: userPrompt
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/png;base64,${context.currentScreenshot}`
+                }
+              }
+            ]
+          }
+        ];
+        
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4o", // Use GPT-4 with vision for screenshot analysis
+          messages: messages,
+          max_tokens: 500,
+          temperature: 0.1 // Low temperature for consistent decisions
+        });
+        
+        const aiResponse = completion.choices[0]?.message?.content || '{}';
+        
+        // Parse the JSON response
+        let decisionResult;
+        try {
+          decisionResult = JSON.parse(aiResponse.trim());
+        } catch (parseError) {
+          // If JSON parsing fails, try to extract JSON from the response
+          const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            decisionResult = JSON.parse(jsonMatch[0]);
+          } else {
+            throw new Error(`Invalid JSON response: ${aiResponse}`);
+          }
+        }
+        
+        logger.log('AI decision made', { 
+          reasoning: decisionResult.reasoning,
+          actionType: decisionResult.action?.type,
+          isComplete: decisionResult.isComplete
+        });
+        
+        return {
+          id,
+          type: 'response',
+          result: {
+            success: true,
+            data: decisionResult
+          }
+        };
+      } catch (error) {
+        logger.error('Screen analysis and decision error', { error: error.message });
+        return sendErrorResponse(id, 500, `Decision making error: ${error.message}`);
+      }
       
     default:
       return sendErrorResponse(id, 400, `Unknown action: ${action}`);
@@ -446,6 +567,17 @@ function sendErrorResponse(id, code, message) {
       message
     }
   };
+}
+
+// Note: Agent loop orchestration is now handled by AgentDriver
+// This ai-driver focuses on providing AI decision-making capabilities
+
+// Note: getAIDecision and buildAgentPrompt are now handled through analyzeScreenAndDecide action
+// executeAgentAction, takeScreenshot, and executeSystemAction are now handled by AgentDriver orchestration
+
+// Utility function for delays
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // Start the server

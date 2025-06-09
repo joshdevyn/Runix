@@ -2,6 +2,12 @@ import { Computer, ComputerAction, ComputerActionResult } from './computer.inter
 import { DriverInstance } from '../drivers/driver.interface';
 import { Logger } from '../utils/logger';
 
+/**
+ * NOTE: This file contains advanced agent functionality that is currently unused.
+ * It provides OpenAI CUA-style intelligent multi-turn conversation capabilities.
+ * Keep for future agent-based orchestration features.
+ */
+
 export interface AgentMessage {
   role: 'user' | 'assistant' | 'system' | 'computer_call' | 'computer_call_output' | 'function_call' | 'function_call_output';
   content?: string | Array<{type: string, text?: string, image_url?: string}>;

@@ -8,20 +8,32 @@
     "build": "node build.js",
     "test": "echo \"Vision driver test not implemented\" && exit 0"
   },
-  "keywords": ["runix", "driver", "vision", "ocr", "automation"],
+  "keywords": [
+    "runix",
+    "driver",
+    "vision",
+    "ocr",
+    "automation"
+  ],
   "author": "Runix Team",
-  "license": "MIT",
-  "dependencies": {
-    "ws": "^8.14.2"
+  "license": "MIT",  "dependencies": {
+    "ws": "^8.14.2",
+    "openai": "^4.20.0",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "pkg": "^5.8.1"
   },
   "optionalDependencies": {
-    "tesseract.js": "^4.1.1"
+    "tesseract.js": "^4.1.4"
   },
   "pkg": {
-    "assets": ["driver.json", "**/*.js"],
-    "targets": ["node18-win-x64"]
+    "assets": [
+      "driver.json",
+      "**/*.js"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ]
   }
 }

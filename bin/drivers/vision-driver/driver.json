@@ -1,7 +1,7 @@
 {
   "id": "vision-driver",
   "name": "VisionDriver",
-  "description": "Computer vision driver for OCR and UI element detection",
+  "description": "Computer vision driver for OCR and UI element detection with GPT-4o support",
   "version": "1.0.0",
   "author": "Runix Team",
   "license": "MIT",
@@ -11,17 +11,30 @@
   "features": [
     "execute",
     "introspection",
-    "health-check"
+    "health-check",
+    "openai-vision",
+    "computer-use-analysis"
   ],
   "actions": [
     "extractText",
     "detectUI",
     "findImage",
-    "analyzeScene"
+    "analyzeScene",
+    "analyzeForComputerUse"
   ],
   "config": {
     "ocrLanguage": "eng",
     "confidenceThreshold": 0.6,
-    "tempDir": "./temp"
+    "tempDir": "./temp",
+    "providers": {
+      "primary": "tesseract",
+      "fallback": "openai"
+    },
+    "openai": {
+      "enabled": true,
+      "model": "gpt-4o",
+      "maxTokens": 2000,
+      "temperature": 0.1
+    }
   }
 }

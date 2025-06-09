@@ -8,17 +8,30 @@
     "build": "node build.js",
     "test": "echo \"System driver test not implemented\" && exit 0"
   },
-  "keywords": ["runix", "driver", "system", "automation"],
+  "keywords": [
+    "runix",
+    "driver",
+    "system",
+    "automation"
+  ],
   "author": "Runix Team",
   "license": "MIT",
   "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "koffi": "^2.11.0",
+    "screenshot-desktop": "^1.15.1",
     "ws": "^8.14.2"
   },
   "devDependencies": {
     "pkg": "^5.8.1"
   },
   "pkg": {
-    "assets": ["driver.json", "**/*.js"],
-    "targets": ["node18-win-x64"]
+    "assets": [
+      "driver.json",
+      "**/*.js"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ]
   }
 }
