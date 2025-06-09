@@ -567,50 +567,7 @@ export class DriverRegistry {
    * List all running driver processes
    */
   public listRunningDrivers(): string[] {
-    const processManager = DriverProcessManager.getInstance();
-    const allProcesses = processManager.getAllProcesses();
+    const processManager = DriverProcessManager.getInstance();    const allProcesses = processManager.getAllProcesses();
     return Array.from(allProcesses.keys());
-  }
-
-  /**
-   * Register a plugin driver
-   */
-  public registerPluginDriver(driverId: string, pluginPath: string): void {
-    const traceId = this.log.startTrace('register-plugin-driver');
-    
-    try {
-      const driverJsonPath = path.join(pluginPath, 'driver.json');
-      
-      if (!fs.existsSync(driverJsonPath)) {
-        throw new Error(`Driver configuration not found at ${driverJsonPath}`);
-      }
-
-      const driverConfig = JSON.parse(fs.readFileSync(driverJsonPath, 'utf-8'));
-      
-      const metadata: DriverMetadata = {
-        id: driverId,
-        name: driverConfig.name || driverId,
-        version: driverConfig.version || '1.0.0',
-        path: pluginPath,
-        executable: driverConfig.executable,
-        config: driverConfig
-      };
-
-      this.drivers.set(driverId, metadata);
-      
-      this.log.info('Plugin driver registered successfully', {
-        traceId,
-        driverId,
-        pluginPath,
-        metadata
-      });
-      
-    } catch (error) {
-      this.log.logMethodError('registerPluginDriver', traceId, error instanceof Error ? error : new Error(String(error)), {
-        driverId,
-        pluginPath
-      });
-      throw error;
-    }
   }
 }

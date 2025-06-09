@@ -1,76 +1,48 @@
 {
-  "timestamp": "2025-06-06T23:46:11.463Z",
+  "timestamp": "2025-06-08T23:22:15.345Z",
   "results": [
     {
       "success": true,
-      "step": "I create file \"automation-log.txt\" with content \"Starting multi-driver workflow at $(date)\"",
+      "step": "echo the message \"Starting test workflow\"",
       "data": {
-        "path": "C:\\_Runix\\automation-log.txt",
-        "size": 41
+        "message": "Starting test workflow"
       },
-      "duration": 4,
-      "timestamp": "2025-06-06T23:46:14.521Z"
-    },
-    {
-      "success": false,
-      "step": "I create file \"test-config.json\" with content '{\"environment\":\"demo\",\"version\":\"1.0\"}'",
-      "error": {},
-      "timestamp": "2025-06-06T23:46:14.525Z"
-    },
-    {
-      "success": false,
-      "step": "I read file \"test-config.json\"",
-      "error": {
-        "name": "StepExecutionError",
-        "context": {
-          "operation": "driver_action_execution",
-          "traceId": "yps9rll0",
-          "driverId": "system-driver"
-        },
-        "cause": {},
-        "type": "STEP_EXECUTION_ERROR"
-      },
-      "timestamp": "2025-06-06T23:46:14.530Z"
-    },
-    {
-      "success": false,
-      "step": "I open the browser at \"https://httpbin.org/forms/post\"",
-      "error": {},
-      "timestamp": "2025-06-06T23:46:14.533Z"
-    },
-    {
-      "success": false,
-      "step": "I analyze intent \"Create a file, open a website, and take a screenshot\"",
-      "error": {},
-      "timestamp": "2025-06-06T23:46:14.535Z"
+      "duration": 2,
+      "timestamp": "2025-06-08T23:22:19.109Z"
     },
     {
       "success": true,
-      "step": "I create file \"test-data.txt\" with content \"RUNIX AUTOMATION TEST\"",
+      "step": "add 5 and 3",
       "data": {
-        "path": "C:\\_Runix\\test-data.txt",
-        "size": 21
+        "sum": 8,
+        "result": 8
+      },
+      "duration": 5,
+      "timestamp": "2025-06-08T23:22:19.117Z"
+    },
+    {
+      "success": true,
+      "step": "wait for 100 milliseconds",
+      "data": {
+        "waitedFor": 100
+      },
+      "duration": 114,
+      "timestamp": "2025-06-08T23:22:19.232Z"
+    },
+    {
+      "success": true,
+      "step": "echo the message \"Test completed successfully\"",
+      "data": {
+        "message": "Test completed successfully"
       },
       "duration": 3,
-      "timestamp": "2025-06-06T23:46:14.541Z"
-    },
-    {
-      "success": false,
-      "step": "I take a screenshot \"desktop-state.png\"",
-      "error": {},
-      "timestamp": "2025-06-06T23:46:14.543Z"
-    },
-    {
-      "success": false,
-      "step": "I create file \"shared-data.json\" with content '{\"message\":\"Hello from System Driver\"}'",
-      "error": {},
-      "timestamp": "2025-06-06T23:46:14.545Z"
+      "timestamp": "2025-06-08T23:22:19.236Z"
     }
   ],
   "summary": {
-    "total": 8,
-    "passed": 2,
-    "failed": 6,
-    "duration": 3084
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "duration": 3892
   }
 }

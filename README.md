@@ -28,7 +28,8 @@ Runix is a powerful, extensible automation engine that runs behavior-driven scen
 - 🔄 **Parallel Execution**: Run multiple scenarios concurrently
 - 📊 **Detailed Reports**: Generate comprehensive test reports with visual artifacts
 - 🧩 **Plugin Architecture**: Easy driver development and deployment with hot-loading
-- 🤖 **AI-Driven Orchestration**: Intelligent step generation and workflow optimization
+- 🤖 **AI-Driven Automation**: Real OpenAI integration with agent, ask, and editor modes for intelligent task completion
+- 🧠 **AI Orchestration**: Intelligent step generation and workflow optimization (coming soon)
 - 🏢 **Enterprise Scaling**: Distributed driver execution for large-scale automation
 - 🔄 **CI/CD Integration**: Ready for your continuous integration pipeline
 - 💻 **Cross-Platform**: Available as binaries for Windows, macOS, and Linux
@@ -50,12 +51,11 @@ Runix features a revolutionary **automatic driver loading** system with intellig
 │ (AST-based) │     │ Dynamic Routing     │     │   Screenshots   │
 └─────────────┘     └─────────────────────┘     └─────────────────┘
                            │                              │
-                           ▼                              ▼
-            ┌─────────────────────────────┐    ┌─────────────────┐
+                           ▼                              ▼            ┌─────────────────────────────┐    ┌─────────────────┐
             │     Driver Ecosystem        │    │   AI Driver     │
-            │ ┌─────────────────────────┐ │    │  (GPT-4/Claude) │
-            │ │    System Driver        │ │    │   Intelligent   │
-            │ │  (File Operations)      │ │    │   Orchestration │
+            │ ┌─────────────────────────┐ │    │ (OpenAI GPT-3.5)│
+            │ │    System Driver        │ │    │ Ask/Agent/Editor│
+            │ │  (File Operations)      │ │    │ + Orchestration │
             │ └─────────────────────────┘ │    └─────────────────┘
             │ ┌─────────────────────────┐ │    ┌─────────────────┐
             │ │    Vision Driver        │ │    │   Visual        │
@@ -182,10 +182,8 @@ Feature: Multi-Driver Automation Demo
     
     # Vision Driver: OCR and visual verification
     Then I extract text from screenshot
-    And I analyze scene in screenshot
-    
-    # AI Driver: Intelligent orchestration
-    And I generate answer for "What automation steps were just completed?"
+    And I analyze scene in screenshot    # AI Driver: Intelligent assistance and orchestration
+    And I ask "What automation steps were just completed?"
     
     # System Driver: Cleanup
     Finally I delete file "test-data.txt"
@@ -253,6 +251,95 @@ runix run ./features/ --tags=@smoke,@critical
 ```bash
 runix list-drivers
 ```
+
+## 🤖 AI-Powered Automation
+
+Runix includes an advanced AI driver with real OpenAI integration for intelligent automation and assistance:
+
+### Current AI Capabilities ✅
+
+**Working Now**: The AI driver provides direct question/answer functionality and basic task assistance through real OpenAI API integration.
+
+**Coming Soon**: Advanced orchestration features including automatic workflow generation, multi-driver coordination, and intelligent step sequencing.
+
+### AI CLI Commands
+
+The AI system operates in multiple modes accessible through the CLI:
+
+```bash
+# Agent Mode - Autonomous task completion
+runix ai agent "Complete the login form and navigate to dashboard"
+
+# Ask Mode - Direct question/answer with AI assistance  
+runix ai ask "What elements can I interact with on this screen?"
+
+# Editor Mode - Learn from user actions
+runix ai editor "user-workflow-session"
+
+# Configuration check
+runix ai config --check
+```
+
+### AI Driver in Feature Files
+
+Use AI capabilities directly in your Gherkin scenarios:
+
+```gherkin
+Feature: AI-Enhanced Automation
+  Scenario: Intelligent task completion
+    # Ask AI for help
+    When I ask "What are the available options on this page?"
+    
+    # Use AI agent mode for complex tasks
+    And I use AI agent mode to "fill out the contact form with test data"
+    
+    # AI analysis and verification
+    Then I analyze intent "verify the form submission was successful"
+    And I generate answer for "What happened after submitting the form?"
+```
+
+### Available AI Steps
+
+The AI driver currently provides 8 registered step patterns:
+
+| Pattern | Status | Description | Example |
+|---------|--------|-------------|---------|
+| `I ask "(.*)"`  | ✅ **Working** | Ask a question to the AI | `I ask "What can you do?"` |
+| `I use AI agent mode to "(.*)"` | 🚧 **Planned** | Complex autonomous tasks | `I use AI agent mode to "complete checkout"` |
+| `I use AI editor mode "(.*)"` | 🚧 **Planned** | Learning mode | `I use AI editor mode "learn-workflow"` |
+| `I analyze intent "(.*)"`  | 🚧 **Planned** | Intent analysis | `I analyze intent "verify success"` |
+| `I generate answer for "(.*)"`| 🚧 **Planned** | Generate responses | `I generate answer for "what happened?"` |
+| `I ask for help with "(.*)"`  | ✅ **Working** | Request assistance | `I ask for help with "navigation"` |
+| `the operation should be successful` | ✅ **Working** | Verify success | `the operation should be successful` |
+| `I set AI mode to "(.*)"`  | ✅ **Working** | Change AI mode | `I set AI mode to "ask"` |
+
+### Configuration
+
+Set up the AI driver with your OpenAI API key:
+
+```bash
+# Environment variables
+export OPENAI_API_KEY="your-openai-api-key"
+export AI_DEFAULT_MODEL="gpt-3.5-turbo"
+export AI_TEMPERATURE="0.7"
+export AI_MAX_TOKENS="1000"
+
+# Check configuration
+runix ai config --check
+```
+
+### Real OpenAI Integration
+
+The AI driver makes actual API calls to OpenAI's GPT-3.5-turbo model:
+
+- **✅ Live responses**: Real AI assistance, not mock data
+- **✅ Context awareness**: Understands current automation state  
+- **✅ Error handling**: Robust error handling for API failures
+- **✅ Debugging support**: Comprehensive logging for troubleshooting
+- **🚧 Multi-driver orchestration**: Intelligent coordination between drivers (coming soon)
+- **🚧 Workflow generation**: Automatic feature file creation (coming soon)
+
+For more advanced AI capabilities, see the [AI System Guide](./docs/AI_SYSTEM_GUIDE.md).
 
 ## 🌐 Web Automation Features
 
@@ -330,11 +417,9 @@ Feature: Cross-Platform Automation
     # Vision Driver: Visual verification
     Then I take a screenshot "import-result.png"
     And I extract text from screenshot
-    And I detect UI elements in screenshot
-    
-    # AI Driver: Intelligent validation
-    And I analyze intent "Verify the customer import was successful"
-    And I generate answer for "What does the import result show?"
+    And I detect UI elements in screenshot    # AI Driver: Intelligent analysis and orchestration
+    And I ask "Verify the customer import was successful"
+    And I analyze intent "What does the import result show?"
     
     # System Driver: Cleanup
     And I delete file "customer-data.csv"
@@ -369,11 +454,11 @@ runix create-driver --name="slack-driver" --template="communication"
       "browserPool": 5,
       "distributedExecution": true,
       "headless": true
-    },
-    "ai-driver": {
-      "provider": "azure-openai",
-      "model": "gpt-4",
-      "rateLimiting": true
+    },    "ai-driver": {
+      "provider": "openai",
+      "model": "gpt-3.5-turbo",
+      "temperature": 0.7,
+      "maxTokens": 1000
     }
   },
   "scaling": {
@@ -536,7 +621,11 @@ npm install
 # 3. Run the comprehensive demo
 task quickstart
 
-# 4. Enjoy both microservices and web automation examples!
+# 4. Try AI automation (requires OpenAI API key)
+export OPENAI_API_KEY="your-api-key"
+runix ai ask "What can you help me with?"
+
+# 5. Enjoy both microservices and web automation examples!
 ```
 
 This will demonstrate the full power of Runix with both microservices communication and real browser automation, complete with screenshots and detailed reporting.

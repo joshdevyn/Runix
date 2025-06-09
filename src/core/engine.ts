@@ -9,7 +9,7 @@ import { Tag, Feature, FeatureChild } from '@cucumber/messages';
 import { StepRegistry } from './stepRegistry';
 import { RunixError, DriverError, StepExecutionError, FeatureParsingError, ConfigurationError, DriverStartupError } from '../utils/errors';
 import { AIOrchestrator } from './aiOrchestrator';
-import { PluginManager } from './pluginManager';
+import * as path from 'path';
 
 interface EngineConfig {
   driverName?: string;
@@ -29,7 +29,7 @@ const DEFAULT_CONFIG: EngineConfig = {
   autoLoadDrivers: env.getBoolean('AUTO_LOAD_DRIVERS', true) || true,
   tags: env.get('TAGS')?.split(',') || [],
   parallelScenarios: env.getBoolean('PARALLEL_SCENARIOS', false) || false,
-  reportPath: env.get('REPORT_PATH', 'runix-report.json') || 'runix-report.json',
+  reportPath: env.get('REPORT_PATH') || path.join('reports', 'runix-report.json'),
   logLevel: parseLogLevel(env.get('LOG_LEVEL') || 'INFO') || LogLevel.INFO,
   logFilePath: env.get('LOG_FILE', 'logs/runix-engine.log') || 'logs/runix-engine.log'
 };
@@ -56,22 +56,17 @@ export class RunixEngine {
   private initialized = false;
   private executionId: string;
   private driverRegistry: DriverRegistry; // Add missing property
-  private aiOrchestrator: AIOrchestrator | null = null;
-  private stepRegistry: StepRegistry;
-  private pluginManager: PluginManager;
-
+  private aiOrchestrator: AIOrchestrator | null = null;  private stepRegistry: StepRegistry;
   // Add constants for better maintainability
   private static readonly DEFAULT_DRIVER_TIMEOUT = 30000;
   private static readonly MAX_PARALLEL_SCENARIOS = 10;
-  private static readonly DRIVER_STARTUP_TIMEOUT = 5000;
+  private static readonly DRIVER_STARTUP_TIMEOUT = 15000;  // Increased to 15 seconds for better reliability
   constructor(config: Partial<EngineConfig> = {}) {
     // First load .env configs, then override with passed config
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.logger = new ResultLogger();
-      // Initialize core components
+    this.logger = new ResultLogger();    // Initialize core components
     this.driverRegistry = DriverRegistry.getInstance();
     this.stepRegistry = StepRegistry.getInstance();
-    this.pluginManager = PluginManager.getInstance();
     
     // Try to get logFilePath from ENV if not specified in config
     if (!this.config.logFilePath) {
@@ -177,26 +172,7 @@ export class RunixEngine {
           operation: 'step_registry_init',
           traceId 
         }, stepError instanceof Error ? stepError : new Error(String(stepError)));      } finally {
-        this.log.endTrace(stepRegistryTraceId);
-      }
-
-      // Initialize plugin manager
-      const pluginManagerTraceId = this.log.startTrace('plugin-manager-initialization');
-      try {
-        this.log.debug('Initializing plugin manager', { traceId, pluginManagerTraceId });
-        await this.pluginManager.initialize();
-        const pluginHealth = this.pluginManager.getPluginHealth();
-        this.log.info('Plugin manager initialized successfully', { 
-          traceId, 
-          pluginManagerTraceId 
-        }, pluginHealth);
-      } catch (pluginError) {
-        this.log.error('Plugin manager initialization failed', { traceId, pluginManagerTraceId }, pluginError);
-        // Continue without plugins - this is not a critical failure
-        this.log.warn('Continuing without plugin support', { traceId });
-      } finally {
-        this.log.endTrace(pluginManagerTraceId);
-      }
+        this.log.endTrace(stepRegistryTraceId);      }
 
       // Initialize driver registry
       const driverRegistryTraceId = this.log.startTrace('driver-registry-initialization');
@@ -434,9 +410,9 @@ export class RunixEngine {
           driverStartTraceId,
           driverId,
           step: 'start_driver_via_registry'
-        });
-
-        // Use the registry to start the driver - this handles process management and transport creation
+        });        // Use the registry to start the driver - this handles process management and transport creation
+        let timeoutHandle: NodeJS.Timeout | null = null;
+        
         driver = await Promise.race([
           (async () => {
             const startTime = Date.now();
@@ -449,10 +425,15 @@ export class RunixEngine {
               driverId,
               duration: `${duration}ms`
             });
+            // Clear timeout on successful completion
+            if (timeoutHandle) {
+              clearTimeout(timeoutHandle);
+              timeoutHandle = null;
+            }
             return result;
           })(),
-          new Promise((_, reject) => 
-            setTimeout(() => {
+          new Promise((_, reject) => {
+            timeoutHandle = setTimeout(() => {
               this.log.error('Driver startup timeout exceeded', { 
                 traceId,
                 driverStartTraceId,
@@ -460,8 +441,9 @@ export class RunixEngine {
                 timeout: RunixEngine.DRIVER_STARTUP_TIMEOUT
               });
               reject(new Error(`Driver startup timeout: ${driverId} (${RunixEngine.DRIVER_STARTUP_TIMEOUT}ms)`));
-            }, RunixEngine.DRIVER_STARTUP_TIMEOUT)
-          )
+            }, RunixEngine.DRIVER_STARTUP_TIMEOUT);
+            return undefined; // This promise only rejects, never resolves
+          })
         ]);
         
         this.log.debug('Driver instance created, validating', { 

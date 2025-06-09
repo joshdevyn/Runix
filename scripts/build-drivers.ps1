@@ -71,16 +71,38 @@ foreach ($driver in $drivers) {
         # Create destination with validation
         if (-not (Test-Path $destPath)) {
             New-Item -ItemType Directory -Force -Path $destPath | Out-Null
-        }
-        # Copy driver files from source to destination
+        }        # Copy driver files from source to destination
         Copy-Item -Path "$sourcePath\*" -Destination $destPath -Recurse -Force
-        Copy-Item -Path "$($driver.FullName)\*" -Destination $destPath -Recurse -Force
+        
+        # Determine the correct executable
+        $executable = "index.js"  # Default fallback
+        
+        # Check for driver.json to get executable info
+        $driverJsonPath = Join-Path $destPath "driver.json"
+        if (Test-Path $driverJsonPath) {
+            try {
+                $driverConfig = Get-Content $driverJsonPath | ConvertFrom-Json
+                if ($driverConfig.executable) {
+                    $executable = $driverConfig.executable
+                    Write-Host "    Using executable from driver.json: $executable"
+                }
+            } catch {
+                Write-Warning "    Could not parse driver.json, using default executable"
+            }
+        } else {
+            # Look for .exe files if no driver.json
+            $exeFiles = Get-ChildItem -Path $destPath -Filter "*.exe" -ErrorAction SilentlyContinue
+            if ($exeFiles.Count -gt 0) {
+                $executable = $exeFiles[0].Name
+                Write-Host "    Found executable: $executable"
+            }
+        }
         
         # Build driver metadata
         $driverInfo = @{
             name = $driverName
             path = $destPath
-            executable = "index.js"
+            executable = $executable
         }
         
         Write-Host "  Driver $driverName processed successfully"

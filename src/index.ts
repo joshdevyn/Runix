@@ -2,6 +2,7 @@
 import { RunixEngine } from './core/engine';
 import { Logger } from './utils/logger';
 import { DriverRegistry } from './drivers/driverRegistry';
+import * as path from 'path';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -12,9 +13,18 @@ let globalEngine: RunixEngine | null = null;
 
 // Setup process signal handlers for graceful shutdown
 const setupSignalHandlers = () => {
+  let isShuttingDown = false; // Prevent multiple shutdown attempts
+  
   const gracefulShutdown = async (signal: string) => {
+    if (isShuttingDown) {
+      logger.info(`Shutdown already in progress, ignoring ${signal}`);
+      return;
+    }
+    
+    isShuttingDown = true;
     logger.info(`Received ${signal}, shutting down gracefully...`);
     
+    // Shutdown engine first
     if (globalEngine && typeof globalEngine.shutdown === 'function') {
       try {
         await globalEngine.shutdown();
@@ -28,20 +38,41 @@ const setupSignalHandlers = () => {
     try {
       const { DriverProcessManager } = await import('./drivers/management/DriverProcessManager');
       const processManager = DriverProcessManager.getInstance();
-      await processManager.stopAllDrivers();
-      logger.info('All driver processes cleaned up');
+      const runningDrivers = processManager.listRunningDrivers();
+      
+      if (runningDrivers.length > 0) {
+        logger.info(`Cleaning up ${runningDrivers.length} running drivers: ${runningDrivers.join(', ')}`);
+        await processManager.stopAllDrivers();
+        logger.info('All driver processes cleaned up');
+      } else {
+        logger.info('No driver processes to clean up');
+      }
     } catch (error) {
       logger.error(`Error cleaning up driver processes: ${error}`);
     }
     
-    process.exit(0);
+    // Exit with appropriate code (don't exit on beforeExit)
+    if (signal !== 'beforeExit') {
+      process.exit(signal === 'uncaughtException' || signal === 'unhandledRejection' ? 1 : 0);
+    }
   };
-  
-  // Handle SIGTERM (kill command)
+    // Handle SIGTERM (kill command)
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   
   // Handle SIGINT (Ctrl+C)
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  
+  // Handle normal process exit (beforeExit for async cleanup)
+  process.on('beforeExit', async (code) => {
+    logger.info(`Process exiting with code: ${code}`);
+    await gracefulShutdown('beforeExit');
+  });
+  
+  // Handle process exit (synchronous cleanup only)
+  process.on('exit', (code) => {
+    logger.info(`Process exit event with code: ${code}`);
+    // Note: No async operations allowed in 'exit' handler
+  });
   
   // Handle uncaught exceptions
   process.on('uncaughtException', async (error) => {
@@ -123,7 +154,7 @@ if (command === 'run') {
         parallelScenarios: typeof options.parallel === 'string' 
           ? options.parallel.toLowerCase() === 'true' 
           : Boolean(options.parallel),
-        reportPath: 'reports/runix-report.json',
+        reportPath: path.join('reports', 'runix-report.json'),
         logLevel: 1, // DEBUG
         logFilePath: 'logs/runix-dev.log'
       };const engine = new RunixEngine(config);
@@ -182,19 +213,18 @@ if (command === 'run') {
   })();
 } else if (command === 'ai') {
   (async () => {
-    const subCommand = args[0];
-    const aiArgs = args.slice(1);
+    const subCommand = args[1];
+    const aiArgs = args.slice(2);
     
-    try {
-      const { AIDriver } = await import('./ai/aiDriver');
-      const aiDriver = new AIDriver();
+    try {const { AgentDriver } = await import('./drivers/ai/AgentDriver');
+      const agentDriver = new AgentDriver();
       
       // Initialize with environment configuration
-      await aiDriver.initialize({
-        openaiApiKey: process.env.OPENAI_API_KEY,
-        model: process.env.OPENAI_MODEL || 'gpt-4-vision-preview',
-        confirmActions: process.env.RUNIX_AI_CONFIRM_ACTIONS !== 'false',
-        outputDir: process.env.RUNIX_AI_OUTPUT_DIR || './ai-artifacts'
+      await agentDriver.initialize({
+        outputDir: process.env.RUNIX_AI_OUTPUT_DIR || './ai-artifacts',
+        aiDriverServiceHost: process.env.RUNIX_AI_SERVICE_HOST || 'localhost',
+        connectionTimeout: parseInt(process.env.RUNIX_AI_CONNECTION_TIMEOUT || '5000'),
+        requestTimeout: parseInt(process.env.RUNIX_AI_REQUEST_TIMEOUT || '30000')
       });
       
       let result;
@@ -205,13 +235,12 @@ if (command === 'run') {
           if (!taskDescription) {
             console.error('Usage: runix ai agent "task description"');
             process.exit(1);
-          }
-          result = await aiDriver.execute('agent', [taskDescription, { confirmActions: true }]);
+          }          result = await agentDriver.execute('agent', [taskDescription, { confirmActions: true }]);
           break;
           
         case 'editor':
           const sessionName = aiArgs[0] || `session-${Date.now()}`;
-          result = await aiDriver.execute('editor', [sessionName]);
+          result = await agentDriver.execute('editor', [sessionName]);
           break;
           
         case 'ask':
@@ -220,7 +249,7 @@ if (command === 'run') {
             console.error('Usage: runix ai ask "your question"');
             process.exit(1);
           }
-          result = await aiDriver.execute('ask', [question]);
+          result = await agentDriver.execute('ask', [question]);
           break;
           
         case 'config':

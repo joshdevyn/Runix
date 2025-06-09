@@ -15,7 +15,11 @@ module.exports = {
     '!src/**/*.d.ts',
   ],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
-  testTimeout: 30000,
+  // Load test environment variables
+  setupFiles: ['<rootDir>/tests/env-setup.js'],
+  testTimeout: 60000, // Increased timeout for AI operations
+  forceExit: true, // Force Jest to exit after tests complete
+  detectOpenHandles: true, // Help identify what's keeping the process alive
   moduleFileExtensions: ['ts', 'js', 'json'],
   // Handle the duplicate package.json files by ignoring bin directory for haste
   haste: {

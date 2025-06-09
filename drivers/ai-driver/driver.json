@@ -1,58 +1,37 @@
 {
   "id": "ai-driver",
   "name": "AIDriver",
-  "description": "Enhanced AI Driver with Multi-Provider Support - Integrates OpenAI, Anthropic, Ollama, and Azure OpenAI for advanced AI capabilities",
-  "version": "3.0.0",
+  "description": "AI orchestration driver for autonomous task completion",
+  "version": "1.0.0",
   "author": "Runix Team",
   "license": "MIT",
-  "executable": "index.js",
+  "executable": "AIDriver.exe",
   "protocol": "websocket",
   "transport": "websocket",
   "features": [
     "execute",
-    "introspection",
-    "ai-coordination",
-    "workflow-generation",
-    "vision-analysis",
-    "session-management",
-    "multi-mode-operation"
-  ],  "actions": [
-    "generateFeature",
-    "analyzeIntent",
-    "discoverDrivers",
-    "generateSteps",
-    "orchestrate",
-    "setMode",
-    "startSession",
-    "analyzeScreenAndPlan",
-    "executeNextAction",
-    "loadFeatureFile",
-    "continueSession",
-    "callAI",
-    "enhanceWithAI",
-    "generateAnswer",
-    "switchProvider",
-    "addProvider",
-    "getProviders",
-    "getActiveProvider"
+    "introspection"
   ],
-  "modes": {
-    "agent": "AI takes control and executes tasks autonomously",
-    "ask": "AI works with user to complete specific tasks with confirmation",
-    "chat": "AI provides guidance and explains what actions would be taken"
-  },  "config": {
-    "model": "gpt-4-vision-preview",
+  "actions": [
+    "agent",
+    "editor",
+    "ask",
+    "analyze",
+    "plan",
+    "execute",
+    "confirm",
+    "learn",
+    "generate",
+    "observe",
+    "interact"
+  ],
+  "config": {
+    "model": "computer-use-preview",
     "temperature": 0.7,
-    "maxTokens": 4000,
-    "defaultMode": "chat",
-    "providers": [
-      {
-        "name": "OpenAI",
-        "type": "openai",
-        "apiKey": "${OPENAI_API_KEY}",
-        "model": "gpt-4o"
-      }
-    ],
-    "activeProvider": "OpenAI"
+    "maxTokens": 2000,
+    "confirmActions": true,
+    "outputDir": "./ai-artifacts",
+    "visionDriver": "VisionDriver",
+    "systemDriver": "SystemDriver"
   }
 }

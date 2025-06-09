@@ -64,6 +64,7 @@ let config = {
   allowedPaths: [process.cwd()], // Security: restrict file operations to allowed paths
   timeout: 30000,
   screenshotDir: './screenshots',
+  testArtifactsDir: './tests/logs', // Default directory for test artifacts
   uiAutomation: {
     mouseMoveDelay: 100,
     clickDelay: 50,
@@ -198,6 +199,20 @@ async function handleInitialize(id, driverConfig) {
 
 // Security helper: validate file path
 function validatePath(filePath) {
+  // Handle test artifact files specially
+  if (filePath.endsWith('.txt') && !path.isAbsolute(filePath)) {
+    // For test files, resolve relative to testArtifactsDir
+    const testArtifactPath = path.resolve(config.testArtifactsDir, filePath);
+    const isAllowed = config.allowedPaths.some(allowedPath => 
+      testArtifactPath.startsWith(path.resolve(allowedPath))
+    );
+    if (!isAllowed) {
+      throw new Error(`Access denied: Path ${filePath} is not in allowed directories`);
+    }
+    return testArtifactPath;
+  }
+  
+  // For other files, use standard resolution
   const resolvedPath = path.resolve(filePath);
   const isAllowed = config.allowedPaths.some(allowedPath => 
     resolvedPath.startsWith(path.resolve(allowedPath))
@@ -431,14 +446,19 @@ async function handleTakeScreenshot(id, args) {
 
   if (screenshot) {
     try {
-      const imageBuffer = await screenshot();
+      logger.log('Attempting to take screenshot...');
+      
+      // Ensure the directory exists
       await fs.mkdir(config.screenshotDir, { recursive: true });
+      logger.log(`Screenshot directory verified: ${config.screenshotDir}`);
+      
+      const imageBuffer = await screenshot();
       await fs.writeFile(filepath, imageBuffer);
+      logger.log(`Screenshot saved: ${filepath}`);
       
       // Convert to base64 for AI processing
       const base64 = imageBuffer.toString('base64');
       
-      logger.log(`Screenshot saved: ${filepath}`);
       return sendSuccessResponse(id, {
         filename: filename,
         path: filepath,
@@ -446,7 +466,9 @@ async function handleTakeScreenshot(id, args) {
         size: imageBuffer.length
       });
     } catch (err) {
-      throw new Error(`Screenshot failed: ${err.message}`);
+      logger.error('Error taking screenshot:', err);
+      logger.error('Error stack:', err.stack); // Log the full stack trace
+      return sendErrorResponse(id, 500, `Failed to take screenshot: ${err.message}`);
     }
   } else {
     // Mock implementation

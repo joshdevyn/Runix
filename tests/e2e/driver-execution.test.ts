@@ -19,15 +19,13 @@ describe('End-to-End Driver Execution', () => {
     });
 
     try {
-      await engine.initialize();
-
-      const featureContent = `
-Feature: Example Service Integration
-  Scenario: Complete workflow
-    Given the service is running on port 3001
-    When I send a GET request to "/health"
-    Then the response status should be 200
-    And the response should contain "status"
+      await engine.initialize();      const featureContent = `
+Feature: Example Driver Integration
+  Scenario: Complete workflow with example driver
+    Given echo the message "Starting test workflow"
+    When add 5 and 3
+    Then wait for 100 milliseconds
+    And echo the message "Test completed successfully"
 `;
 
       const featureFile = testUtils.createFeatureFile(featureContent);

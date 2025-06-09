@@ -120,16 +120,23 @@ afterAll(async () => {
     try {
       // 1. Shutdown all registered engines
       logger.info(`Shutting down ${globalTestState.engines.size} engines...`);
-      for (const engine of globalTestState.engines) {
-        try {
+      for (const engine of globalTestState.engines) {        try {
           if (engine && typeof engine.shutdown === 'function') {
+            let timeoutHandle: NodeJS.Timeout | null = null;
             await Promise.race([
-              engine.shutdown(),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Engine shutdown timeout')), 5000)
-              )
+              engine.shutdown().then((result: any) => {
+                if (timeoutHandle) {
+                  clearTimeout(timeoutHandle);
+                  timeoutHandle = null;
+                }
+                return result;
+              }),
+              new Promise((_, reject) => {
+                timeoutHandle = setTimeout(() => reject(new Error('Engine shutdown timeout')), 5000);
+              })
             ]);
-          }        } catch (error) {
+          }
+        } catch (error) {
           logger.error('Error shutting down engine', { class: 'TestSetup', method: 'afterAll' }, error);
         }
       }
@@ -137,31 +144,47 @@ afterAll(async () => {
 
       // 2. Stop all driver registries
       logger.info(`Stopping ${globalTestState.driverRegistries.size} driver registries...`);
-      for (const registry of globalTestState.driverRegistries) {
-        try {
+      for (const registry of globalTestState.driverRegistries) {        try {
           if (registry && typeof registry.stopAllDrivers === 'function') {
+            let timeoutHandle: NodeJS.Timeout | null = null;
             await Promise.race([
-              registry.stopAllDrivers(),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Registry cleanup timeout')), 5000)
-              )
+              registry.stopAllDrivers().then((result: any) => {
+                if (timeoutHandle) {
+                  clearTimeout(timeoutHandle);
+                  timeoutHandle = null;
+                }
+                return result;
+              }),
+              new Promise((_, reject) => {
+                timeoutHandle = setTimeout(() => reject(new Error('Registry cleanup timeout')), 5000);
+              })
             ]);
-          }        } catch (error) {
+          }
+        } catch (error) {
           logger.error('Error stopping driver registry', { class: 'TestSetup', method: 'afterAll' }, error);
         }
       }
-      globalTestState.driverRegistries.clear();
-
-      // 3. Force stop any remaining driver processes
+      globalTestState.driverRegistries.clear();      // 3. Force stop any remaining driver processes
       try {
         const { DriverProcessManager } = require('../src/drivers/management/DriverProcessManager');
         const processManager = DriverProcessManager.getInstance();
+        
+        let timeoutHandle: NodeJS.Timeout | null = null;
         await Promise.race([
-          processManager.stopAllDrivers(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Process manager cleanup timeout')), 5000)
-          )
-        ]);      } catch (error) {
+          processManager.stopAllDrivers().then((result: any) => {
+            if (timeoutHandle) {
+              clearTimeout(timeoutHandle);
+              timeoutHandle = null;
+            }
+            return result;
+          }),
+          new Promise((_, reject) => {
+            timeoutHandle = setTimeout(() => {
+              reject(new Error('Process manager cleanup timeout'));
+            }, 5000);
+          })
+        ]);
+      } catch (error) {
         logger.error('Error during process manager cleanup', { class: 'TestSetup', method: 'afterAll' }, error);
       }
 

@@ -54,33 +54,8 @@ if (!fs.existsSync(mainFile)) {
 }
 
 // Create wrapper script for port handling
-const wrapperContent = `#!/usr/bin/env node
-// Get port from environment (assigned by Runix engine) or command line for standalone testing
-const port = (() => {
-  const envPort = process.env.RUNIX_DRIVER_PORT;
-  if (envPort) return envPort; // Engine assigned port takes precedence
-  
-  const portArg = process.argv.find(arg => arg.startsWith('--port='));
-  if (portArg) return portArg.replace('--port=', '');
-  const portIndex = process.argv.indexOf('--port');
-  if (portIndex !== -1 && process.argv[portIndex + 1]) return process.argv[portIndex + 1];
-  return '9004'; // Default for standalone testing
-})();
-
-// Validate port number
-const portNum = parseInt(port, 10);
-if (isNaN(portNum) || portNum < 1024 || portNum > 65535) {
-  console.error('Invalid port number:', port);
-  process.exit(1);
-}
-
-// Set the port in environment for the driver to use
-process.env.RUNIX_DRIVER_PORT = portNum.toString();
-require('./${mainFile}');
-`;
-
-fs.writeFileSync('driver.js', wrapperContent);
-logger.log('Created driver.js wrapper');
+// Use the working standalone.js as the entry point
+logger.log('Using existing standalone.js as entry point');
 
 // Build standalone executable
 const executableName = process.platform === 'win32' ? 'AIDriver.exe' : 'AIDriver';
@@ -89,7 +64,7 @@ logger.log(`Building standalone executable: ${executableName}`);
 
 try {
     // Build standalone executable with correct target format
-    execSync('npm exec -- pkg driver.js --targets node18-win-x64 --output AIDriver.exe', { stdio: 'inherit' });
+    execSync('npm exec -- pkg standalone.js --targets node18-win-x64 --output AIDriver.exe', { stdio: 'inherit' });
     
     logger.log(`✅ Successfully built ${executableName}`);
     

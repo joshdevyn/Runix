@@ -208,3 +208,49 @@ test('driver handles multiple requests efficiently', async () => {
   expect(duration).toBeLessThan(5000); // Should complete in under 5 seconds
 });
 ```
+
+## Testing Specific Driver Implementations
+
+### Vision Driver Tests
+
+The Vision Driver includes specific tests for its functionalities, such as GPT-4o integration. To run these tests:
+
+1.  **Start the Vision Driver:**
+    Open a terminal and navigate to the `drivers/vision-driver` directory. Then, run the driver using npm:
+    ```bash
+    cd c:\\_Runix\\drivers\\vision-driver
+    npm start
+    ```
+    You should see log output indicating the driver has started, typically listening on port 9003.
+
+2.  **Run the Test Script:**
+    Open another terminal and navigate to the root of the Runix project (`c:\\_Runix`). Then, execute the specific test script. For example, to test GPT-4o specific features:
+    ```bash
+    node c:\\_Runix\\drivers\\vision-driver\\test-gpt4o-specific.js
+    ```
+    The test script will connect to the running Vision Driver and execute the tests. Look for output indicating test success or failure.
+
+    Other test files for the vision driver may exist in `c:\\_Runix\\drivers\\vision-driver\\` and can be run similarly.
+
+## Common Issues
+
+### Driver Not Starting
+
+If your driver fails to start during tests, check:
+1. All dependencies are installed
+2. The command and args in driver.json are correct
+3. Your driver handles the RUNIX_DRIVER_PORT environment variable
+
+### Action Failures
+
+If actions fail:
+1. Verify your actions return the correct response format
+2. Check for error handling in your code
+3. Validate parameters are processed correctly
+
+### Protocol Non-Compliance
+
+If protocol tests fail:
+1. Verify all required endpoints are implemented
+2. Ensure response formats match the specification
+3. Check error handling for invalid requests

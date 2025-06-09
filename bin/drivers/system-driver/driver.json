@@ -47,7 +47,9 @@
   },
   "config": {
     "workingDirectory": ".",
-    "allowedPaths": ["."],
+    "allowedPaths": [
+      "."
+    ],
     "timeout": 30000,
     "screenshotDir": "./screenshots",
     "uiAutomation": {

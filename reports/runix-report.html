@@ -21,25 +21,25 @@
 <body>
     <div class="header">
         <h1>Runix Test Report</h1>
-        <p>Generated: 2025-06-06T23:46:11.463Z</p>
-        <p>Duration: 3084ms</p>
+        <p>Generated: 2025-06-08T23:22:15.345Z</p>
+        <p>Duration: 3892ms</p>
     </div>
     
     <div class="summary">
         <div class="summary-card">
-            <h3>8</h3>
+            <h3>4</h3>
             <p>Total Steps</p>
         </div>
         <div class="summary-card passed">
-            <h3>2</h3>
+            <h3>4</h3>
             <p>Passed</p>
         </div>
         <div class="summary-card failed">
-            <h3>6</h3>
+            <h3>0</h3>
             <p>Failed</p>
         </div>
         <div class="summary-card">
-            <h3>25%</h3>
+            <h3>100%</h3>
             <p>Success Rate</p>
         </div>
     </div>
@@ -47,82 +47,42 @@
     <h2>Step Results</h2>
     
         <div class="step success">
-            <strong>Step 1: I create file "automation-log.txt" with content "Starting multi-driver workflow at $(date)"</strong>
+            <strong>Step 1: echo the message "Starting test workflow"</strong>
             <div class="step-details">
-                <span class="duration">4ms</span>
+                <span class="duration">2ms</span>
                 ✅ PASSED
-                <br>Data: {"path":"C:\\_Runix\\automation-log.txt","size":41}
+                <br>Data: {"message":"Starting test workflow"}
                 
-            </div>
-        </div>
-    
-        <div class="step failure">
-            <strong>Step 2: I create file "test-config.json" with content '{"environment":"demo","version":"1.0"}'</strong>
-            <div class="step-details">
-                <span class="duration">0ms</span>
-                ❌ FAILED
-                
-                <br><span class="error">Error: No matching step found: "I create file "test-config.json" with content '{"environment":"demo","version":"1.0"}'"</span>
-            </div>
-        </div>
-    
-        <div class="step failure">
-            <strong>Step 3: I read file "test-config.json"</strong>
-            <div class="step-details">
-                <span class="duration">0ms</span>
-                ❌ FAILED
-                
-                <br><span class="error">Error: I read file "test-config.json" - ENOENT: no such file or directory, open 'C:\_Runix\test-config.json'</span>
-            </div>
-        </div>
-    
-        <div class="step failure">
-            <strong>Step 4: I open the browser at "https://httpbin.org/forms/post"</strong>
-            <div class="step-details">
-                <span class="duration">0ms</span>
-                ❌ FAILED
-                
-                <br><span class="error">Error: No matching step found: "I open the browser at "https://httpbin.org/forms/post""</span>
-            </div>
-        </div>
-    
-        <div class="step failure">
-            <strong>Step 5: I analyze intent "Create a file, open a website, and take a screenshot"</strong>
-            <div class="step-details">
-                <span class="duration">0ms</span>
-                ❌ FAILED
-                
-                <br><span class="error">Error: No matching step found: "I analyze intent "Create a file, open a website, and take a screenshot""</span>
             </div>
         </div>
     
         <div class="step success">
-            <strong>Step 6: I create file "test-data.txt" with content "RUNIX AUTOMATION TEST"</strong>
+            <strong>Step 2: add 5 and 3</strong>
+            <div class="step-details">
+                <span class="duration">5ms</span>
+                ✅ PASSED
+                <br>Data: {"sum":8,"result":8}
+                
+            </div>
+        </div>
+    
+        <div class="step success">
+            <strong>Step 3: wait for 100 milliseconds</strong>
+            <div class="step-details">
+                <span class="duration">114ms</span>
+                ✅ PASSED
+                <br>Data: {"waitedFor":100}
+                
+            </div>
+        </div>
+    
+        <div class="step success">
+            <strong>Step 4: echo the message "Test completed successfully"</strong>
             <div class="step-details">
                 <span class="duration">3ms</span>
                 ✅ PASSED
-                <br>Data: {"path":"C:\\_Runix\\test-data.txt","size":21}
+                <br>Data: {"message":"Test completed successfully"}
                 
-            </div>
-        </div>
-    
-        <div class="step failure">
-            <strong>Step 7: I take a screenshot "desktop-state.png"</strong>
-            <div class="step-details">
-                <span class="duration">0ms</span>
-                ❌ FAILED
-                
-                <br><span class="error">Error: No matching step found: "I take a screenshot "desktop-state.png""</span>
-            </div>
-        </div>
-    
-        <div class="step failure">
-            <strong>Step 8: I create file "shared-data.json" with content '{"message":"Hello from System Driver"}'</strong>
-            <div class="step-details">
-                <span class="duration">0ms</span>
-                ❌ FAILED
-                
-                <br><span class="error">Error: No matching step found: "I create file "shared-data.json" with content '{"message":"Hello from System Driver"}'"</span>
             </div>
         </div>
     

@@ -141,9 +141,7 @@ export class WebSocketDriverInstance {
       // Set up timeout with longer duration for web operations
       const timeoutId = setTimeout(() => {
         reject(new Error(`Request timeout for method: ${method}. Consider increasing timeout for slow-loading pages.`));
-      }, this.defaultTimeout);
-
-      const messageHandler = (data: WebSocket.Data) => {
+      }, this.defaultTimeout);      const messageHandler = (data: WebSocket.Data) => {
         try {
           const response = JSON.parse(data.toString());
           if (response.id === requestId) {
@@ -152,9 +150,31 @@ export class WebSocketDriverInstance {
               this.ws.off('message', messageHandler);
             }
             
+            // Enhanced logging to debug response structure
+            this.log.info(`[WEBSOCKET-RESPONSE] Raw response received`, {
+              method,
+              requestId,
+              responseKeys: Object.keys(response),
+              hasResult: 'result' in response,
+              hasError: 'error' in response,
+              errorStructure: response.error ? Object.keys(response.error) : null,
+              fullResponse: response
+            });
+            
             if (response.result !== undefined) {
               resolve(response.result);
             } else if (response.error) {
+              // Enhanced error logging
+              this.log.error(`[WEBSOCKET-ERROR] Error response from driver`, {
+                method,
+                requestId,
+                errorObject: response.error,
+                errorMessage: response.error.message,
+                errorCode: response.error.code,
+                hasMessage: 'message' in response.error,
+                messageType: typeof response.error.message
+              });
+              
               reject(new Error(response.error.message || 'Unknown error'));
             } else {
               resolve(response);
@@ -174,16 +194,24 @@ export class WebSocketDriverInstance {
       }
     });
   }
-
   async stop(): Promise<void> {
     const traceId = this.log.startTrace('websocket-driver-stop');
     
     try {
       if (this.ws) {
-        this.ws.close();
+        // Force terminate immediately for cleanup
+        this.ws.terminate();
         this.ws = null;
         this.connected = false;
       }
+      
+      // Clear any pending requests
+      for (const [id, pending] of this.pendingRequests) {
+        clearTimeout(pending.timeoutId);
+        pending.reject(new Error('Driver stopped'));
+      }
+      this.pendingRequests.clear();
+      
       this.log.debug('WebSocket driver stopped', { traceId });
     } finally {
       this.log.endTrace(traceId);
@@ -238,11 +266,18 @@ export class WebSocketDriverInstance {
   private generateRequestId(): string {
     return Math.random().toString(36).substring(2, 15);
   }
-  
-  async disconnect(): Promise<void> {
+    async disconnect(): Promise<void> {
     if (this.ws) {
-      this.ws.close();
+      this.ws.terminate();
       this.ws = null;
+      this.connected = false;
     }
+    
+    // Clear any pending requests
+    for (const [id, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeoutId);
+      pending.reject(new Error('Driver disconnected'));
+    }
+    this.pendingRequests.clear();
   }
 }

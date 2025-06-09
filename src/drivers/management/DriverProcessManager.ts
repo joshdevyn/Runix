@@ -226,21 +226,26 @@ export class DriverProcessManager {
       server.on('error', () => resolve(false));
     });
   }
-
   private setupProcessHandlers(processInfo: ProcessInfo, traceId: string): void {
     const { process: childProcess, driverId } = processInfo;
 
     childProcess.stdout?.on('data', (data) => {
       const output = data.toString().trim();
       if (output) {
-        this.log.debug(`Driver stdout [${driverId}]`, { traceId, output });
+        // Use info level for stdout to make it visible in tests
+        this.log.info(`Driver stdout [${driverId}]`, { traceId, output });
+        // Also output directly to console for debugging
+        console.log(`[DRIVER-STDOUT] ${driverId}: ${output}`);
       }
     });
 
     childProcess.stderr?.on('data', (data) => {
       const output = data.toString().trim();
       if (output) {
-        this.log.warn(`Driver stderr [${driverId}]`, { traceId, output });
+        // Use error level for stderr to make it highly visible
+        this.log.error(`Driver stderr [${driverId}]`, { traceId, output });
+        // Also output directly to console for debugging
+        console.error(`[DRIVER-STDERR] ${driverId}: ${output}`);
       }
     });
 

@@ -72,14 +72,14 @@ pkgProcess.on('close', (code) => {
     logger.error(`pkg process exited with code ${code}`);
     process.exit(code);
   }
-  
-  // Check what files were actually created and rename them appropriately
-  const binContents = fs.readdirSync('bin').filter(file => file.startsWith('runix'));
+    // Check what files were actually created and rename them appropriately
+  const binContents = fs.readdirSync('bin');
   logger.info(`Files created in bin: ${binContents.join(', ')}`);
-    // Map platform-specific naming
+  
+  // Map platform-specific naming
   const platformMapping = {
     'win-x64': { pattern: /index.*win.*\.exe$/i, finalName: 'runix.exe' },
-    'linux-x64': { pattern: /index.*linux/i, finalName: 'runix' },
+    'linux-x64': { pattern: /index.*linux/i, finalName: 'runix-linux' },
     'macos-x64': { pattern: /index.*macos/i, finalName: 'runix-macos' }
   };
   
