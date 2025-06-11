@@ -1,0 +1,3 @@
+This is a test file for file upload testing.
+It contains sample text for the web driver file upload functionality.
+Created for comprehensive web driver testing.

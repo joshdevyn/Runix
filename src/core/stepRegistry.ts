@@ -65,19 +65,39 @@ export class StepRegistry {
     this.log.warn(`No matching step found for: "${stepText}"`);
     return null;
   }
-  
-  /**
+    /**
    * Check if step text matches a pattern
    */
   private matchesPattern(stepText: string, pattern: string): boolean {
     try {
-      // If pattern already contains regex syntax, use it directly
       let regexPattern = pattern;
       
-      // If pattern uses simple parentheses notation, convert to regex
-      if (!pattern.includes('\\') && pattern.includes('(') && pattern.includes(')')) {
+      // Handle different pattern formats:
+      
+      // 1. Cucumber-style expressions like: "I navigate to {string}"
+      if (pattern.includes('{string}')) {
+        regexPattern = pattern.replace(/\{string\}/g, '"([^"]*)"');
+      }
+      if (pattern.includes('{int}')) {
+        regexPattern = regexPattern.replace(/\{int\}/g, '(\\d+)');
+      }
+      if (pattern.includes('{float}')) {
+        regexPattern = regexPattern.replace(/\{float\}/g, '([+-]?\\d*\\.?\\d+)');
+      }
+      if (pattern.includes('{word}')) {
+        regexPattern = regexPattern.replace(/\{word\}/g, '(\\w+)');
+      }
+      if (pattern.includes('{text}')) {
+        regexPattern = regexPattern.replace(/\{text\}/g, '(.+?)');
+      }
+      
+      // 2. Simple parentheses notation like: "add (a) and (b)"
+      else if (!pattern.includes('\\') && pattern.includes('(') && pattern.includes(')') && !pattern.includes('"')) {
         regexPattern = pattern.replace(/\(([^)]+)\)/g, '(.+?)');
       }
+      
+      // 3. Raw regex patterns like: "the page title should contain \"(.*)\""
+      // These are already in regex format, use as-is
       
       const regex = new RegExp(`^${regexPattern}$`, 'i');
       const matches = regex.test(stepText);

@@ -12,29 +12,17 @@ const possibleEnvPaths = [
   path.join(__dirname, '.env'),                    // Local .env in binary dir
   path.join(__dirname, '../../.env'),              // Original Runix root
   path.join(__dirname, '../../../.env'),           // From bin/drivers/ai-driver to root
-  path.join(process.cwd(), '.env'),                // Current working directory
-  'C:\\_Runix\\.env'                               // Absolute path as fallback
+  path.join(process.cwd(), '.env'),                // Current working directory  'C:\\_Runix\\.env'                               // Absolute path as fallback
 ];
-
-console.log('DEBUG: __dirname:', __dirname);
-console.log('DEBUG: process.cwd():', process.cwd());
 
 let envLoaded = false;
 for (const envPath of possibleEnvPaths) {
-  console.log('DEBUG: Trying env path:', envPath);
   if (fs.existsSync(envPath)) {
-    console.log('DEBUG: Found .env file at:', envPath);
     require('dotenv').config({ path: envPath });
     envLoaded = true;
     break;
   }
 }
-
-if (!envLoaded) {
-  console.log('DEBUG: No .env file found in any of the attempted paths');
-}
-
-console.log('DEBUG: OPENAI_API_KEY from env:', process.env.OPENAI_API_KEY);
 
 // Create structured logger for driver processes
 function createDriverLogger() {
@@ -75,7 +63,6 @@ const manifest = require('./driver.json');
 
 // Initialize OpenAI client
 const apiKey = process.env.OPENAI_API_KEY || 'test_key';
-console.log('DEBUG: Final API key being used:', apiKey);
 logger.log('OpenAI API Key loaded', { keyPreview: apiKey ? apiKey.substring(0, 20) + '...' : 'NOT SET' });
 
 const openai = new OpenAI({

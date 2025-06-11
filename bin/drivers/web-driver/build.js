@@ -24,20 +24,20 @@ function createBuildLogger() {
       const caller = getCallerInfo();
       const timestamp = new Date().toISOString();
       const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
-      console.log(`${timestamp} [INFO] [build.js::WebDriverBuilder::${caller}] ${message}${dataStr}`);
+      console.log(`${timestamp} [INFO] [build.js::UnifiedWebDriverBuilder::${caller}] ${message}${dataStr}`);
     },
     error: (message, data = {}) => {
       const caller = getCallerInfo();
       const timestamp = new Date().toISOString();
       const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
-      console.error(`${timestamp} [ERROR] [build.js::WebDriverBuilder::${caller}] ${message}${dataStr}`);
+      console.error(`${timestamp} [ERROR] [build.js::UnifiedWebDriverBuilder::${caller}] ${message}${dataStr}`);
     }
   };
 }
 
 const logger = createBuildLogger();
 
-logger.log('Building WebDriver...');
+logger.log('Building Unified WebDriver...');
 
 // Validate we're in the right directory
 if (!fs.existsSync('package.json') || !fs.existsSync('driver.json')) {
@@ -46,16 +46,12 @@ if (!fs.existsSync('package.json') || !fs.existsSync('driver.json')) {
 }
 
 try {
-  // First compile TypeScript
-  logger.log('Compiling TypeScript...');
-  execSync('npm run compile', { stdio: 'inherit' });
-  
   // Read package.json to get the main entry point
   const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-  const mainFile = 'dist/index.js'; // Compiled output
-  
+  const mainFile = packageJson.main || 'index.js';
+
   if (!fs.existsSync(mainFile)) {
-    logger.error(`Error: Compiled file ${mainFile} not found`);
+    logger.error(`Error: Main file ${mainFile} not found`);
     process.exit(1);
   }
 
@@ -70,7 +66,7 @@ const port = (() => {
   if (portArg) return portArg.replace('--port=', '');
   const portIndex = process.argv.indexOf('--port');
   if (portIndex !== -1 && process.argv[portIndex + 1]) return process.argv[portIndex + 1];
-  return '8000'; // Default for standalone testing
+  return '9001'; // Default for standalone testing
 })();
 
 // Validate port number
@@ -82,40 +78,36 @@ if (isNaN(portNum) || portNum < 1024 || portNum > 65535) {
 
 // Set the port in environment for the driver to use
 process.env.RUNIX_DRIVER_PORT = portNum.toString();
-require('./dist/index.js');
+require('./index.js');
 `;
 
   fs.writeFileSync('driver.js', wrapperContent);
   logger.log('Created driver.js wrapper');
 
   // Build standalone executable
-  const executableName = process.platform === 'win32' ? 'WebDriver.exe' : 'WebDriver';
+  const driverJson = JSON.parse(fs.readFileSync('driver.json', 'utf8'));
+  const executableName = driverJson.executable || (process.platform === 'win32' ? 'WebDriver.exe' : 'WebDriver');
 
-  logger.log(`Building standalone executable: ${executableName}`);
-
-  // Build standalone executable with correct target format
-  execSync('npm exec -- pkg driver.js --targets node18-win-x64 --output WebDriver.exe', { stdio: 'inherit' });
+  logger.log(`Building standalone executable: ${executableName}`);  // Build standalone executable with correct target format
+  const pkgAssets = packageJson.pkg?.assets || [];
+  const assetArgs = pkgAssets.length > 0 ? `--assets ${pkgAssets.join(',')}` : '';
+  
+  const pkgCommand = `npm exec -- pkg driver.js --targets node18-win-x64 --output ${executableName} ${assetArgs}`;
+  logger.log(`Running: ${pkgCommand}`);
+  
+  execSync(pkgCommand, { stdio: 'inherit' });
   
   logger.log(`✅ Successfully built ${executableName}`);
   
   // Verify executable exists
-  if (fs.existsSync(executableName)) {
-    logger.log(`📁 Executable size: ${Math.round(fs.statSync(executableName).size / 1024 / 1024)} MB`);
-    
-    // Update driver.json to reference the executable
-    const driverConfig = JSON.parse(fs.readFileSync('driver.json', 'utf8'));
-    driverConfig.executable = executableName;
-    fs.writeFileSync('driver.json', JSON.stringify(driverConfig, null, 2));
-    logger.log('✅ Updated driver.json executable reference');
-    
-    logger.log('\n🎉 WebDriver build complete!');
-    logger.log(`Standalone testing: ./${executableName} --port=8000`);
-    logger.log(`Engine usage: Port will be assigned automatically by Runix`);
-  } else {
-    logger.error('❌ Executable not found after build');
+  if (!fs.existsSync(executableName)) {
+    logger.error(`Error: Executable ${executableName} not found after build`);
     process.exit(1);
   }
-} catch (error) {
-  logger.error('Error during build process', { error: error.message });
+
+  logger.log('✅ Unified WebDriver build process complete');
+
+} catch (err) {
+  logger.error('Build failed:', err);
   process.exit(1);
 }

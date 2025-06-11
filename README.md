@@ -51,7 +51,7 @@ Runix features a revolutionary **automatic driver loading** system with intellig
 │ (AST-based) │     │ Dynamic Routing     │     │   Screenshots   │
 └─────────────┘     └─────────────────────┘     └─────────────────┘
                            │                              │
-                           ▼                              ▼            ┌─────────────────────────────┐    ┌─────────────────┐
+            ┌─────────────────────────────┐    ┌─────────────────┐
             │     Driver Ecosystem        │    │   AI Driver     │
             │ ┌─────────────────────────┐ │    │ (OpenAI GPT-3.5)│
             │ │    System Driver        │ │    │ Ask/Agent/Editor│
