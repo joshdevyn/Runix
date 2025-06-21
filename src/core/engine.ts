@@ -72,8 +72,7 @@ export class RunixEngine {
     if (!this.config.logFilePath) {
       this.config.logFilePath = env.get('LOG_FILE');
     }
-    
-    // Setup the logger with configured options
+      // Setup the logger with configured options
     this.log = Logger.getInstance({
       level: this.config.logLevel,
       filePath: this.config.logFilePath,
@@ -84,6 +83,9 @@ export class RunixEngine {
         envSource: env.getEnvFilePath() || 'none'
       }
     });
+    
+    // Start a new logging session for this run
+    this.log.startNewSession();
     
     this.executionId = env.get('EXECUTION_ID') || Math.random().toString(36).substring(2, 15);
     this.log.info(

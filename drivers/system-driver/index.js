@@ -7,6 +7,28 @@ const { promisify } = require('util');
 
 const execAsync = promisify(exec);
 
+// Load .env from multiple possible locations
+const possibleEnvPaths = [
+  path.join(__dirname, '.env'),                    // Local .env in driver dir
+  path.join(__dirname, '../../.env'),              // Original Runix root
+  path.join(__dirname, '../../../.env'),           // From bin/drivers/system-driver to root
+  path.join(process.cwd(), '.env'),                // Current working directory
+];
+
+let envLoaded = false;
+for (const envPath of possibleEnvPaths) {
+  try {
+    const fsSync = require('fs');
+    if (fsSync.existsSync(envPath)) {
+      require('dotenv').config({ path: envPath });
+      envLoaded = true;
+      break;
+    }
+  } catch (err) {
+    // Ignore errors and try next path
+  }
+}
+
 // Get port from environment variable (assigned by engine) or use default for standalone
 const port = parseInt(process.env.RUNIX_DRIVER_PORT || '9002', 10);
 const manifest = require('./driver.json');
@@ -14,13 +36,22 @@ const manifest = require('./driver.json');
 // Try to load system automation libraries
 let nutjs = null;
 let screenshot = null;
+let robot = null;
 try {
-  const { mouse, keyboard, screen, Button } = require('@nut-tree-fork/nut-js');
-  nutjs = { mouse, keyboard, screen, Button };
+  const { mouse, keyboard, screen, Button, Key } = require('@nut-tree-fork/nut-js');
+  nutjs = { mouse, keyboard, screen, Button, Key };
   screenshot = require('screenshot-desktop');
   console.log('[SystemDriver] Modern UI automation libraries loaded successfully');
 } catch (err) {
   console.log('[SystemDriver] UI automation libraries not available:', err.message);
+}
+
+// Try to load robot-js as fallback
+try {
+  robot = require('robot-js');
+  console.log('[SystemDriver] robot-js loaded as fallback automation library');
+} catch (err) {
+  console.log('[SystemDriver] robot-js not available:', err.message);
 }
 
 // Create structured logger for driver processes
@@ -38,20 +69,310 @@ function createDriverLogger() {
     return 'unknown';
   };
 
+  // Base64 truncation utilities
+  const isBase64String = (str) => {
+    if (typeof str !== 'string' || str.length < 50) return false;
+    if (str.startsWith('data:image/')) return true;
+    const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+    return base64Regex.test(str) && str.length > 100;
+  };
+
+  const isBase64Field = (fieldName) => {
+    const base64FieldNames = [
+      'image', 'screenshot', 'data', 'content', 'base64', 'src', 
+      'imageData', 'screenshotData', 'capturedImage', 'blob'
+    ];
+    const lowerFieldName = fieldName.toLowerCase();
+    return base64FieldNames.some(name => lowerFieldName.includes(name));
+  };
+
+  const truncateBase64Content = (obj, maxLength = 100) => {
+    // Check environment variable for full base64 logging
+    const showFullBase64 = process.env.RUNIX_LOG_FULL_BASE64 === 'true';
+    
+    if (showFullBase64) {
+      return obj;
+    }
+
+    if (typeof obj === 'string') {
+      if (isBase64String(obj)) {
+        return obj.length > maxLength 
+          ? `${obj.substring(0, maxLength)}...[truncated base64, ${obj.length} chars total]`
+          : obj;
+      }
+      return obj;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.map(item => truncateBase64Content(item, maxLength));
+    }
+
+    if (obj && typeof obj === 'object') {
+      const result = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (typeof value === 'string' && isBase64Field(key) && isBase64String(value)) {
+          result[key] = value.length > maxLength 
+            ? `${value.substring(0, maxLength)}...[truncated base64, ${value.length} chars total]`
+            : value;
+        } else {
+          result[key] = truncateBase64Content(value, maxLength);
+        }
+      }
+      return result;
+    }
+
+    return obj;
+  };
+
   return {
     log: (message, data = {}) => {
       const caller = getCallerInfo();
       const timestamp = new Date().toISOString();
-      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      let dataStr = '';
+      if (Object.keys(data).length > 0) {
+        const processedData = truncateBase64Content(data);
+        dataStr = ` ${JSON.stringify(processedData)}`;
+      }
       console.log(`${timestamp} [INFO] [index.js::SystemDriver::${caller}] ${message}${dataStr}`);
     },
     error: (message, data = {}) => {
       const caller = getCallerInfo();
       const timestamp = new Date().toISOString();
-      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      let dataStr = '';
+      if (Object.keys(data).length > 0) {
+        const processedData = truncateBase64Content(data);
+        dataStr = ` ${JSON.stringify(processedData)}`;
+      }
       console.error(`${timestamp} [ERROR] [index.js::SystemDriver::${caller}] ${message}${dataStr}`);
     }
   };
+}
+
+// Embedded Heartbeat Implementation for System Driver
+class DriverHeartbeat {
+  constructor(options = {}) {
+    this.driverName = options.driverName || 'System';
+    this.logger = options.logger || logger;
+    this.server = options.server;
+    this.wss = options.wss;
+    
+    // Configuration from environment or defaults
+    this.heartbeatInterval = parseInt(process.env.RUNIX_DRIVER_HEARTBEAT_INTERVAL || '30000'); // 30 seconds
+    this.autoShutdownTimeout = parseInt(process.env.RUNIX_DRIVER_AUTO_SHUTDOWN_TIMEOUT || '300000'); // 5 minutes
+    this.heartbeatEnabled = process.env.RUNIX_DRIVER_HEARTBEAT_ENABLED !== 'false'; // Default to true
+    this.autoShutdownEnabled = process.env.RUNIX_DRIVER_AUTO_SHUTDOWN_ENABLED !== 'false'; // Default to true
+    
+    // State
+    this.lastHeartbeat = Date.now();
+    this.heartbeatIntervalId = null;
+    this.autoShutdownTimeoutId = null;
+    this.isShuttingDown = false;
+    
+    this.setupSignalHandlers();
+    this.start();
+  }
+  
+  updateHeartbeat() {
+    this.lastHeartbeat = Date.now();
+    
+    if (this.autoShutdownTimeoutId) {
+      clearTimeout(this.autoShutdownTimeoutId);
+    }
+    
+    if (this.autoShutdownEnabled && !this.isShuttingDown) {
+      this.autoShutdownTimeoutId = setTimeout(() => {
+        this.logger.log(`Auto-shutdown timeout reached, no engine communication detected`, {
+          timeoutMs: this.autoShutdownTimeout,
+          lastHeartbeat: new Date(this.lastHeartbeat).toISOString(),
+          driverName: this.driverName
+        });
+        this.gracefulShutdown('auto-shutdown');
+      }, this.autoShutdownTimeout);
+    }
+  }
+  
+  start() {
+    if (!this.heartbeatEnabled) {
+      this.logger.log('Heartbeat monitoring disabled', { driverName: this.driverName });
+      return;
+    }
+    
+    this.logger.log('Starting heartbeat monitoring', {
+      heartbeatInterval: this.heartbeatInterval,
+      autoShutdownTimeout: this.autoShutdownTimeout,
+      heartbeatEnabled: this.heartbeatEnabled,
+      autoShutdownEnabled: this.autoShutdownEnabled,
+      driverName: this.driverName
+    });
+    
+    this.heartbeatIntervalId = setInterval(() => {
+      const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
+      this.logger.log('Heartbeat check', {
+        timeSinceLastHeartbeat: timeSinceLastHeartbeat,
+        lastHeartbeat: new Date(this.lastHeartbeat).toISOString(),
+        status: timeSinceLastHeartbeat < this.autoShutdownTimeout ? 'healthy' : 'timeout-pending',
+        driverName: this.driverName
+      });
+    }, this.heartbeatInterval);
+    
+    // Initialize heartbeat
+    this.updateHeartbeat();
+  }
+  
+  stop() {
+    if (this.heartbeatIntervalId) {
+      clearInterval(this.heartbeatIntervalId);
+      this.heartbeatIntervalId = null;
+    }
+    if (this.autoShutdownTimeoutId) {
+      clearTimeout(this.autoShutdownTimeoutId);
+      this.autoShutdownTimeoutId = null;
+    }
+  }
+  
+  getStatus() {
+    return {
+      enabled: this.heartbeatEnabled,
+      lastHeartbeat: this.lastHeartbeat ? new Date(this.lastHeartbeat).toISOString() : null,
+      timeSinceLastHeartbeat: this.lastHeartbeat ? Date.now() - this.lastHeartbeat : null,
+      autoShutdownEnabled: this.autoShutdownEnabled,
+      autoShutdownTimeout: this.autoShutdownTimeout,
+      nextAutoShutdown: this.lastHeartbeat ? new Date(this.lastHeartbeat + this.autoShutdownTimeout).toISOString() : null,
+      driverName: this.driverName
+    };
+  }
+  
+  gracefulShutdown(reason = 'unknown') {
+    if (this.isShuttingDown) {
+      this.logger.log('Shutdown already in progress, ignoring', { reason, driverName: this.driverName });
+      return;
+    }
+    
+    this.isShuttingDown = true;
+    this.logger.log(`Initiating graceful shutdown`, { reason, driverName: this.driverName });
+    
+    // Stop heartbeat monitoring
+    this.stop();
+    
+    // Perform driver-specific cleanup
+    cleanup().then(() => {
+      // Close WebSocket server
+      if (this.wss) {
+        this.wss.close(() => {
+          this.logger.log('WebSocket server closed', { driverName: this.driverName });
+        });
+      }
+      
+      // Close HTTP server
+      if (this.server) {
+        this.server.close(() => {
+          this.logger.log('HTTP server closed', { reason, driverName: this.driverName });
+          process.exit(0);
+        });
+      } else {
+        this.logger.log('No server to close, exiting directly', { reason, driverName: this.driverName });
+        process.exit(0);
+      }
+    }).catch((error) => {
+      this.logger.error('Error during cleanup, forcing exit', { reason, error, driverName: this.driverName });
+      process.exit(1);
+    });
+    
+    // Force exit after 5 seconds if graceful shutdown fails
+    setTimeout(() => {
+      this.logger.error('Forced shutdown after timeout', { reason, driverName: this.driverName });
+      process.exit(1);
+    }, 5000);
+  }
+  
+  setupSignalHandlers() {
+    process.on('SIGINT', () => {
+      this.logger.log('Received SIGINT, shutting down gracefully', { driverName: this.driverName });
+      this.gracefulShutdown('SIGINT');
+    });
+
+    process.on('SIGTERM', () => {
+      this.logger.log('Received SIGTERM, shutting down gracefully', { driverName: this.driverName });
+      this.gracefulShutdown('SIGTERM');
+    });
+    
+    // Handle uncaught exceptions
+    process.on('uncaughtException', (error) => {
+      this.logger.error('Uncaught exception, shutting down', { 
+        error: error.message, 
+        stack: error.stack,
+        driverName: this.driverName 
+      });
+      this.gracefulShutdown('uncaughtException');
+    });
+    
+    // Handle unhandled promise rejections
+    process.on('unhandledRejection', (reason, promise) => {
+      this.logger.error('Unhandled promise rejection, shutting down', { 
+        reason: reason?.toString?.() || 'unknown',
+        driverName: this.driverName 
+      });
+      this.gracefulShutdown('unhandledRejection');
+    });
+  }
+  
+  static handleCLICommands(driverName = 'unknown') {
+    const args = process.argv.slice(2);
+    const command = args[0];
+
+    if (command) {
+      switch (command) {
+        case '--ping':
+        case 'ping':
+          console.log(`${driverName} Driver is responsive`);
+          process.exit(0);
+          break;
+          
+        case '--shutdown':
+        case 'shutdown':
+          console.log(`Shutting down ${driverName} Driver via CLI command`);
+          process.exit(0);
+          break;
+          
+        case '--health':
+        case 'health':
+          console.log(JSON.stringify({
+            status: 'healthy',
+            driverName: driverName,
+            pid: process.pid,
+            uptime: process.uptime(),
+            memory: process.memoryUsage(),
+            timestamp: new Date().toISOString()
+          }, null, 2));
+          process.exit(0);
+          break;
+          
+        case '--help':
+        case 'help':
+          console.log(`
+${driverName} Driver CLI Commands:
+  --ping, ping       Check if driver is responsive
+  --shutdown        Shutdown the driver
+  --health          Show driver health status
+  --help            Show this help message
+  --port=<port>     Set the port (can also use RUNIX_DRIVER_PORT env var)
+  
+Environment Variables:
+  RUNIX_DRIVER_PORT                   Driver port
+  RUNIX_DRIVER_HEARTBEAT_ENABLED      Enable heartbeat monitoring (default: true)
+  RUNIX_DRIVER_HEARTBEAT_INTERVAL     Heartbeat interval in ms (default: 30000)
+  RUNIX_DRIVER_AUTO_SHUTDOWN_ENABLED  Enable auto-shutdown (default: true)
+  RUNIX_DRIVER_AUTO_SHUTDOWN_TIMEOUT  Auto-shutdown timeout in ms (default: 300000)
+`);
+          process.exit(0);
+          break;
+      }
+    }
+    
+    // Parse port from command line if provided
+    const portArg = args.find(arg => arg.startsWith('--port='));
+    return portArg ? parseInt(portArg.split('=')[1], 10) : null;
+  }
 }
 
 const logger = createDriverLogger();
@@ -60,6 +381,10 @@ logger.log(`System Driver starting on port ${port}`);
 
 // Process management
 const activeProcesses = new Map();
+
+// Key press monitoring
+let keyPressHistory = [];
+
 let config = {
   workingDirectory: process.cwd(),
   allowedPaths: [process.cwd()], // Security: restrict file operations to allowed paths
@@ -69,7 +394,7 @@ let config = {
   uiAutomation: {
     mouseMoveDelay: 100,
     clickDelay: 50,
-    typeDelay: 10,
+    typeDelay: 150, // Human-like typing speed (150ms between characters)
     doubleClickSpeed: 300
   }
 };
@@ -106,10 +431,35 @@ server.listen(port, '127.0.0.1', () => {
   logger.log(`WebSocket server ready for connections`);
 });
 
+// Initialize heartbeat system
+let heartbeat = null;
+try {
+  // Handle CLI commands first
+  DriverHeartbeat.handleCLICommands('System');
+  
+  // Initialize heartbeat system
+  heartbeat = new DriverHeartbeat({
+    driverName: 'System',
+    logger: logger,
+    server: server,
+    wss: wss
+  });
+  
+  logger.log('Heartbeat system initialized');
+} catch (error) {
+  logger.error('Failed to initialize heartbeat system:', error);
+}
+
 // Handle incoming messages
 function handleMessage(ws, message) {
   try {
     const request = JSON.parse(message);
+    
+    // Update heartbeat on any engine communication
+    if (heartbeat) {
+      heartbeat.updateHeartbeat();
+    }
+    
     handleRequest(request).then(response => {
       ws.send(JSON.stringify(response));
     }).catch(err => {
@@ -164,17 +514,53 @@ async function handleRequest(request) {
         return handleIntrospect(request.id, request.params?.type || 'steps');
 
       case 'execute':
-        return handleExecute(request.id, request.params?.action, request.params?.args || []);
-
-      case 'health':
+        return handleExecute(request.id, request.params?.action, request.params?.args || []);      case 'health':
         return {
           id: request.id,
           type: 'response',
-          result: { status: 'ok' }
+          result: { 
+            status: 'ok',
+            pid: process.pid,
+            uptime: process.uptime(),
+            memory: process.memoryUsage(),
+            heartbeat: heartbeat ? heartbeat.getStatus() : null,
+            timestamp: new Date().toISOString()
+          }
+        };
+
+      case 'heartbeat':
+        // Explicit heartbeat endpoint
+        if (heartbeat) {
+          heartbeat.updateHeartbeat();
+        }
+        return {
+          id: request.id,
+          type: 'response',
+          result: { 
+            heartbeat: 'updated',
+            timestamp: new Date().toISOString(),
+            ...(heartbeat ? heartbeat.getStatus() : {})
+          }
+        };
+
+      case 'ping':
+        return {
+          id: request.id,
+          type: 'response',
+          result: { 
+            ping: 'pong',
+            timestamp: new Date().toISOString(),
+            driverName: 'System'
+          }
         };
 
       case 'shutdown':
-        await cleanup();
+        if (heartbeat) {
+          heartbeat.gracefulShutdown('shutdown-command');
+        } else {
+          await cleanup();
+          process.exit(0);
+        }
         return sendSuccessResponse(request.id, { shutdown: true });
 
       default:
@@ -427,9 +813,14 @@ async function handleExecute(id, action, args) {
       
       case 'verifyEachFileContent':
         return await handleVerifyEachFileContent(id, args);
-      
-      case 'cleanUpFiles':
+        case 'cleanUpFiles':
         return await handleCleanUpFiles(id, args);
+
+      case 'checkKeyPressed':
+        return await handleCheckKeyPressed(id, args);
+
+      case 'checkAnyKeyPressed':
+        return await handleCheckAnyKeyPressed(id, args);
 
       default:
         return sendErrorResponse(id, 400, `Unknown action: ${action}`);
@@ -578,8 +969,33 @@ async function handleTypeText(id, args) {
   if (!nutjs) {
     return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
   }
-
-  try {
+  try {    // Clear any stuck modifier keys before typing
+    logger.log('Ensuring all modifier keys are released before typing');
+    try {
+      // Release any potentially held modifier keys
+      const modifiersToRelease = [
+        nutjs.Key.LeftWin, nutjs.Key.RightWin,
+        nutjs.Key.LeftControl, nutjs.Key.RightControl,
+        nutjs.Key.LeftShift, nutjs.Key.RightShift,
+        nutjs.Key.LeftAlt, nutjs.Key.RightAlt
+      ];
+      
+      for (const modKey of modifiersToRelease) {
+        try {
+          await nutjs.keyboard.releaseKey(modKey);
+        } catch (err) {
+          // Ignore individual release errors - key might not be held
+        }
+      }
+      
+      // Small delay to ensure all keys are released
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      logger.log('Modifier key cleanup completed before typing');
+    } catch (releaseError) {
+      logger.log('Modifier key cleanup before typing:', releaseError.message);
+    }
+    
     // Nut.js doesn't have typeStringDelayed, so we'll simulate it
     for (const char of text) {
       await nutjs.keyboard.type(char);
@@ -588,7 +1004,7 @@ async function handleTypeText(id, args) {
       }
     }
     
-    logger.log(`Typed text: "${text}" with delay ${delay}ms`);
+    logger.log(`Typed text: "${text}" with delay ${delay}ms (after modifier cleanup)`);
     return sendSuccessResponse(id, {
       text: text,
       delay: delay,
@@ -607,25 +1023,277 @@ async function handlePressKey(id, args) {
   if (!nutjs) {
     return sendErrorResponse(id, 500, 'UI automation library (nut-js) not available. Please install @nut-tree-fork/nut-js package.');
   }
-
   try {
+    // Convert key name to nut-js Key enum value
+    const getKeyValue = (keyName) => {
+      const keyMap = {
+        'Enter': nutjs.Key.Enter,
+        'Return': nutjs.Key.Return,
+        'Space': nutjs.Key.Space,
+        'Tab': nutjs.Key.Tab,
+        'Escape': nutjs.Key.Escape,
+        'Backspace': nutjs.Key.Backspace,
+        'Delete': nutjs.Key.Delete,
+        'ArrowUp': nutjs.Key.Up,
+        'ArrowDown': nutjs.Key.Down,
+        'ArrowLeft': nutjs.Key.Left,
+        'ArrowRight': nutjs.Key.Right,
+        'Home': nutjs.Key.Home,
+        'End': nutjs.Key.End,
+        'PageUp': nutjs.Key.PageUp,
+        'PageDown': nutjs.Key.PageDown,        
+        'Win': nutjs.Key.LeftWin,
+        'Windows': nutjs.Key.LeftWin,
+        'Meta': nutjs.Key.LeftWin,
+        'StartMenu': nutjs.Key.LeftWin, // Will use Ctrl+Esc combination for Start menu
+        'Cmd': nutjs.Key.LeftCmd,
+        'Control': nutjs.Key.LeftControl,
+        'Ctrl': nutjs.Key.LeftControl,
+        'Alt': nutjs.Key.LeftAlt,
+        'Shift': nutjs.Key.LeftShift,
+        'F1': nutjs.Key.F1,
+        'F2': nutjs.Key.F2,
+        'F3': nutjs.Key.F3,
+        'F4': nutjs.Key.F4,
+        'F5': nutjs.Key.F5,
+        'F6': nutjs.Key.F6,
+        'F7': nutjs.Key.F7,
+        'F8': nutjs.Key.F8,
+        'F9': nutjs.Key.F9,
+        'F10': nutjs.Key.F10,
+        'F11': nutjs.Key.F11,
+        'F12': nutjs.Key.F12,
+        // Add single letter keys
+        'R': nutjs.Key.R,
+        'r': nutjs.Key.R,
+        'A': nutjs.Key.A,
+        'a': nutjs.Key.A
+      };
+      
+      return keyMap[keyName] || nutjs.Key[keyName] || keyName;
+    };
+
+    const nutjsKey = getKeyValue(key);
+
+    // Special handling for common Windows key combinations
+    if (modifiers.length > 0) {
+      const modKey = modifiers[0]?.toLowerCase();
+      const keyLower = key.toLowerCase();
+      
+      // Handle Win+R (Run dialog) specially
+      if ((modKey === 'win' || modKey === 'windows' || modKey === 'meta') && keyLower === 'r') {
+        logger.log('Opening Run dialog using Win+R combination');
+        try {
+          await nutjs.keyboard.pressKey(nutjs.Key.LeftWin, nutjs.Key.R);
+        } catch (combError) {
+          logger.log('Win+R combination failed, trying manual approach');
+          await nutjs.keyboard.pressKey(nutjs.Key.LeftWin);
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await nutjs.keyboard.pressKey(nutjs.Key.R);
+        }
+        await new Promise(resolve => setTimeout(resolve, 300)); // Allow Run dialog to open
+        
+        // Record the key press in history for monitoring
+        keyPressHistory.push({
+          key: key,
+          timestamp: Date.now(),
+          modifiers: modifiers
+        });
+        
+        logger.log(`Pressed Win+R combination`);
+        return sendSuccessResponse(id, {
+          key: key,
+          modifiers: modifiers,
+          action: 'key-combination-pressed'
+        });
+      }
+      
+      // Handle Ctrl+Esc (Start menu) specially  
+      if ((modKey === 'ctrl' || modKey === 'control') && keyLower === 'escape') {
+        logger.log('Opening Start Menu using Ctrl+Esc combination');
+        try {
+          await nutjs.keyboard.pressKey(nutjs.Key.LeftControl, nutjs.Key.Escape);
+        } catch (combError) {
+          logger.log('Ctrl+Esc combination failed, trying manual approach');
+          await nutjs.keyboard.pressKey(nutjs.Key.LeftControl);
+          await new Promise(resolve => setTimeout(resolve, 50));
+          await nutjs.keyboard.pressKey(nutjs.Key.Escape);
+          await new Promise(resolve => setTimeout(resolve, 50));
+          try {
+            if (typeof nutjs.keyboard.releaseKey === 'function') {
+              await nutjs.keyboard.releaseKey(nutjs.Key.LeftControl);
+            }
+          } catch (releaseError) {
+            logger.error('Failed to release Control key:', releaseError.message);
+          }
+        }
+        await new Promise(resolve => setTimeout(resolve, 500)); // Allow Start menu to open
+        
+        // Record the key press in history for monitoring
+        keyPressHistory.push({
+          key: key,
+          timestamp: Date.now(),
+          modifiers: modifiers
+        });
+        
+        logger.log(`Pressed Ctrl+Esc combination`);
+        return sendSuccessResponse(id, {
+          key: key,
+          modifiers: modifiers,
+          action: 'key-combination-pressed'
+        });
+      }
+    }
+
     if (modifiers.length > 0) {
       // Convert modifiers to nut-js format and press key combination
       const nutjsModifiers = modifiers.map(mod => {
         switch (mod.toLowerCase()) {
           case 'ctrl':
-          case 'control': return nutjs.keyboard.Key.LeftControl;
-          case 'alt': return nutjs.keyboard.Key.LeftAlt;
-          case 'shift': return nutjs.keyboard.Key.LeftShift;
+          case 'control': return nutjs.Key.LeftControl;
+          case 'alt': return nutjs.Key.LeftAlt;
+          case 'shift': return nutjs.Key.LeftShift;
           case 'meta':
-          case 'cmd': return nutjs.keyboard.Key.LeftCmd;
+          case 'cmd': return nutjs.Key.LeftCmd;
+          case 'win':
+          case 'windows': return nutjs.Key.LeftWin;
           default: return mod;
         }
       });
-      await nutjs.keyboard.pressKey(nutjs.keyboard.Key[key] || key, ...nutjsModifiers);
-    } else {
-      await nutjs.keyboard.pressKey(nutjs.keyboard.Key[key] || key);
+      
+      logger.log(`Pressing key combination: ${modifiers.join('+')}+${key}`);
+      
+      // For key combinations, we need to hold down modifiers while pressing the main key
+      // Use keyboard.pressKey with all keys at once (nut-js handles this as a combination)
+      try {
+        // Try the combination approach first
+        await nutjs.keyboard.pressKey(...nutjsModifiers, nutjsKey);
+      } catch (combError) {
+        logger.log('Combination failed, trying manual hold/release approach');
+        // Fallback: manually hold modifiers, press key, release modifiers
+        try {
+          // Hold down all modifiers
+          for (const modifier of nutjsModifiers) {
+            await nutjs.keyboard.pressKey(modifier);
+          }
+          
+          // Small delay to ensure modifiers are registered
+          await new Promise(resolve => setTimeout(resolve, 50));
+          
+          // Press and release the main key
+          await nutjs.keyboard.pressKey(nutjsKey);
+          
+          // Small delay before releasing modifiers
+          await new Promise(resolve => setTimeout(resolve, 50));
+            // Release all modifiers in reverse order
+          for (let i = nutjsModifiers.length - 1; i >= 0; i--) {
+            try {
+              if (typeof nutjs.keyboard.releaseKey === 'function') {
+                await nutjs.keyboard.releaseKey(nutjsModifiers[i]);
+              } else {
+                // If releaseKey is not available, just press the key again briefly
+                // This is not ideal but better than leaving modifiers stuck
+                logger.log('releaseKey not available, using workaround');
+              }
+            } catch (releaseError) {
+              logger.error('Failed to release modifier key:', releaseError.message);
+            }
+          }
+        } catch (manualError) {
+          logger.error('Both combination approaches failed:', { combError: combError.message, manualError: manualError.message });
+          throw manualError;
+        }
+      }
+    } else {      // Special handling for Start menu - use Ctrl+Esc as fallback
+      if (key === 'StartMenu') {
+        logger.log('Opening Start Menu using Ctrl+Esc combination');
+        // Press Control+Escape combination using proper key combination
+        try {
+          await nutjs.keyboard.pressKey(nutjs.Key.LeftControl, nutjs.Key.Escape);
+        } catch (combError) {
+          logger.log('StartMenu combination failed, trying manual approach');
+          // Fallback manual approach
+          await nutjs.keyboard.pressKey(nutjs.Key.LeftControl);
+          await new Promise(resolve => setTimeout(resolve, 50));          await nutjs.keyboard.pressKey(nutjs.Key.Escape);
+          await new Promise(resolve => setTimeout(resolve, 50));
+          try {
+            if (typeof nutjs.keyboard.releaseKey === 'function') {
+              await nutjs.keyboard.releaseKey(nutjs.Key.LeftControl);
+            }
+          } catch (releaseError) {
+            logger.error('Failed to release Control key:', releaseError.message);
+          }
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));      } else {        // Special handling for Windows key - try multiple approaches
+        if (key === 'Win' || key === 'Windows' || key === 'Meta') {
+          logger.log('Attempting to open Start menu with Windows key - using proper press/release pattern');
+          
+          let startMenuOpened = false;
+          
+          // Method 1: Use nutjs pressKey followed by releaseKey for proper key tap
+          try {
+            logger.log('Method 1: Using nutjs pressKey + releaseKey pattern');
+            await nutjs.keyboard.pressKey(nutjs.Key.LeftWin);
+            await new Promise(resolve => setTimeout(resolve, 100)); // Brief hold to register the press
+            await nutjs.keyboard.releaseKey(nutjs.Key.LeftWin);
+            await new Promise(resolve => setTimeout(resolve, 800)); // Wait for Start menu to open
+            logger.log('Windows key press/release completed - Start menu should be open');
+            startMenuOpened = true;
+          } catch (nutjsError) {
+            logger.log('Method 1 failed:', nutjsError.message);
+            
+            // Method 2: PowerShell SendKeys fallback
+            try {
+              logger.log('Method 2: Using PowerShell SendKeys');
+              const { exec } = require('child_process');
+              const execPromise = promisify(exec);
+              const psScript = 'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{LWIN}")';
+              await execPromise(`powershell -Command "${psScript}"`);
+              await new Promise(resolve => setTimeout(resolve, 500));
+              logger.log('Used PowerShell SendKeys for Windows key');
+              startMenuOpened = true;
+            } catch (psError) {
+              logger.log('Method 2 failed:', psError.message);
+              
+              // Method 3: Ctrl+Esc fallback (alternative Start menu shortcut)
+              try {
+                logger.log('Method 3: Using Ctrl+Esc as Start menu fallback');                await nutjs.keyboard.pressKey(nutjs.Key.LeftControl, nutjs.Key.Escape);
+                await new Promise(resolve => setTimeout(resolve, 100));
+                await nutjs.keyboard.releaseKey(nutjs.Key.LeftControl, nutjs.Key.Escape);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                logger.log('Used Ctrl+Esc for Start menu');
+                startMenuOpened = true;
+              } catch (ctrlEscError) {
+                logger.log('Method 3 failed:', ctrlEscError.message);
+                throw new Error(`All Windows key methods failed: ${nutjsError.message}, ${psError.message}, ${ctrlEscError.message}`);
+              }
+            }
+          }
+          
+          if (startMenuOpened) {
+            logger.log('Windows key press completed - Start menu should be open');
+          }
+        } else {
+          // Regular key press for non-Windows keys
+          await nutjs.keyboard.pressKey(nutjsKey);
+          // For regular keys, immediately release them to avoid sticky keys
+          await nutjs.keyboard.releaseKey(nutjsKey);
+        }
+      }
     }
+    
+    // Record the key press in history for monitoring
+    keyPressHistory.push({
+      key: key,
+      timestamp: Date.now(),
+      modifiers: modifiers
+    });
+    
+    // Keep only recent key presses (last 10 seconds)
+    const currentTime = Date.now();
+    keyPressHistory = keyPressHistory.filter(keyPress => 
+      (currentTime - keyPress.timestamp) < 10000
+    );
     
     logger.log(`Pressed key: ${key}${modifiers.length ? ' with modifiers: ' + modifiers.join('+') : ''}`);
     return sendSuccessResponse(id, {
@@ -1395,6 +2063,58 @@ async function handleCleanUpFiles(id, args) {
   }
 }
 
+// Key monitoring functions for agent mode
+async function handleCheckKeyPressed(id, args) {
+  const keyToCheck = args[0];
+  
+  try {
+    // Check if the key was recently pressed (within last 1 second)
+    const currentTime = Date.now();
+    const recentlyPressed = keyPressHistory.some(keyPress => 
+      keyPress.key === keyToCheck && 
+      (currentTime - keyPress.timestamp) < 1000
+    );
+    
+    // Clear old key presses (older than 5 seconds)
+    keyPressHistory = keyPressHistory.filter(keyPress => 
+      (currentTime - keyPress.timestamp) < 5000
+    );
+    
+    return sendSuccessResponse(id, {
+      key: keyToCheck,
+      pressed: recentlyPressed,
+      action: 'key-checked'
+    });
+  } catch (err) {
+    logger.error('Failed to check key press:', err);
+    return sendErrorResponse(id, 500, `Failed to check key press: ${err.message}`);
+  }
+}
+
+async function handleCheckAnyKeyPressed(id, args) {
+  try {
+    // Check if any key was recently pressed (within last 1 second)
+    const currentTime = Date.now();
+    const anyRecentPress = keyPressHistory.some(keyPress => 
+      (currentTime - keyPress.timestamp) < 1000
+    );
+    
+    // Clear old key presses (older than 5 seconds)
+    keyPressHistory = keyPressHistory.filter(keyPress => 
+      (currentTime - keyPress.timestamp) < 5000
+    );
+    
+    return sendSuccessResponse(id, {
+      anyKeyPressed: anyRecentPress,
+      recentKeys: keyPressHistory.filter(kp => (currentTime - kp.timestamp) < 1000).map(kp => kp.key),
+      action: 'any-key-checked'
+    });
+  } catch (err) {
+    logger.error('Failed to check any key press:', err);
+    return sendErrorResponse(id, 500, `Failed to check any key press: ${err.message}`);
+  }
+}
+
 // Cleanup function
 async function cleanup() {
   try {
@@ -1412,15 +2132,4 @@ async function cleanup() {
   }
 }
 
-// Handle process termination
-process.on('SIGTERM', async () => {
-  logger.log('Received SIGTERM, shutting down gracefully');
-  await cleanup();
-  process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-  logger.log('Received SIGINT, shutting down gracefully');
-  await cleanup();
-  process.exit(0);
-});
+// Note: Signal handlers are now managed by DriverHeartbeat

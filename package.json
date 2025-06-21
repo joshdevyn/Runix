@@ -4,7 +4,8 @@
   "main": "src/index.ts",
   "bin": {
     "runix": "dist/index.js"
-  },  "scripts": {
+  },
+  "scripts": {
     "start": "ts-node src/index.ts",
     "dev": "ts-node-dev --respawn src/index.ts",
     "build": "npm run clean && tsc && npm run build-drivers && npm run build-binaries && npm run copy-drivers",
@@ -14,7 +15,7 @@
     "copy-drivers": "node scripts/copy-drivers.js",
     "clean": "rimraf dist bin temp",
     "example": "ts-node src/index.ts run scenarios/example.feature",
-    "driver-example": "ts-node src/index.ts run scenarios/example-driver.feature",    
+    "driver-example": "ts-node src/index.ts run scenarios/example-driver.feature",
     "test": "jest",
     "test:unit": "jest --testPathPattern=tests/unit",
     "test:integration": "jest --testPathPattern=tests/integration",
@@ -46,9 +47,15 @@
     "@anthropic-ai/sdk": "^0.53.0",
     "@cucumber/gherkin": "^26.0.0",
     "@cucumber/messages": "^26.0.0",
+    "@types/chokidar": "^1.7.5",
+    "@types/cron": "^2.0.1",
+    "@types/nodemailer": "^6.4.17",
     "@types/ws": "^8.18.1",
     "bullmq": "^5.51.1",
+    "chokidar": "^4.0.3",
+    "cron": "^4.3.1",
     "dotenv": "^16.5.0",
+    "nodemailer": "^7.0.3",
     "openai": "^5.1.1",
     "uuid": "^9.0.0",
     "vscode-languageserver": "^8.0.2",

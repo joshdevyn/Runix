@@ -5,6 +5,10 @@
 
 const { handleAgentMode } = require('../modes/agentMode');
 const { handleAskMode } = require('../modes/askMode');
+const { handleExecuteMode } = require('../modes/executeMode');
+const { handleObserveMode } = require('../modes/observeMode');
+const { handlePlanMode } = require('../modes/planMode');
+const { handleAnalyzeMode } = require('../modes/analyzeMode');
 const { takeScreenshot, analyzeScreen } = require('../core/aiDriverMethods');
 const { updateConfig } = require('../config/config');
 const { getSessionContext, updateSessionContext } = require('../config/config');
@@ -162,12 +166,25 @@ async function handleExecute(ws, id, params, config, llmProvider) {
                 
             case 'agent':
                 await handleAgentMode(ws, id, args, config, llmProvider);
-                break;
-                  case 'ask':
+                break;            case 'ask':
                 await handleAskMode(ws, id, args, config, llmProvider);
                 break;
                 
+            case 'execute':
+                await handleExecuteMode(ws, id, args, config, llmProvider);
+                break;
+                  case 'observe':
+                await handleObserveMode(ws, id, args, config, llmProvider);
+                break;
+                  case 'plan':
+                await handlePlanMode(ws, id, args, config, llmProvider);
+                break;
+                
             case 'analyze':
+                await handleAnalyzeMode(ws, id, args, config, llmProvider);
+                break;
+                
+            case 'analyzeScreen':
                 if (!args || !args.screenshot) {
                     sendErrorResponse(ws, id, 'Missing screenshot parameter for analyze action');
                     return;
@@ -179,7 +196,8 @@ async function handleExecute(ws, id, params, config, llmProvider) {
                     sendErrorResponse(ws, id, analysisResult.error);
                 }
                 break;
-                  case 'startSession':
+                
+            case 'startSession':
                 const sessionId = `session-${Date.now()}`;
                 
                 // Get current session context and update it

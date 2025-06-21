@@ -81,14 +81,13 @@ async function handleCapabilities(id) {
       result: {
         name: manifest.name,
         version: manifest.version,
-        description: manifest.description,
-        supportedActions: [
-          'setMode', 'agent', 'ask', 'analyze',
+        description: manifest.description,        supportedActions: [
+          'setMode', 'agent', 'ask', 'analyze', 'execute', 'observe', 'plan',
           'startSession', 'verifyResponse', 'verifyResult', 'verifySuccess',
           'startEditorMode', 'stopEditorMode', 'recordUserAction', 'generateFeatureFromObservations'
         ],
         supportedFeatures: ["introspection", "feature-replay"],
-        supportedModes: ['agent', 'ask', 'editor'],
+        supportedModes: ['agent', 'ask', 'editor', 'execute', 'observe', 'plan', 'analyze'],
         llmProvider: {
           type: config.llmProvider.type,
           model: config.llmProvider.model,

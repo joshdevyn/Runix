@@ -204,25 +204,229 @@ Browser automation using Playwright:
 }
 ```
 
-### AI Driver
+### AI Driver (Enhanced 2025)
 
-OpenAI-powered intelligent automation:
+**🤖 Advanced AI-Powered Automation Platform**
 
-**Capabilities:**
-- Natural language question answering
-- Task analysis and guidance
-- Agent mode for autonomous completion
-- Context-aware assistance
+The AI Driver has been completely enhanced with multiple intelligent modes for autonomous task completion, strategic planning, data analysis, and system monitoring.
 
-**Configuration Example:**
+### Modern AI Architecture
+
+- **Multiple AI Models**: Configurable OpenAI models (GPT-4o, GPT-4o-mini, GPT-4-turbo)
+- **Computer Vision**: Advanced screenshot analysis and UI understanding
+- **Multi-Modal Processing**: Text, image, and system state analysis
+- **Intelligent Planning**: Strategic task decomposition and execution
+
+### AI Modes
+
+**Available AI Modes:**
+
+#### 📝 Ask Mode - Interactive Q&A
+Direct question-answering with context awareness:
+```bash
+runix ai ask "How do I write a test for API endpoints?"
+runix ai ask "Explain this error message: TypeError undefined"
+runix ai ask "Best practices for web automation"
+```
+
+#### 🤖 Agent Mode - Autonomous Task Completion
+AI autonomously completes complex tasks with optional human confirmation:
+```bash
+runix ai agent "Create comprehensive tests for user registration"
+runix ai agent "Analyze performance logs and generate report"
+runix ai agent "Set up CI/CD pipeline for this project" --confirm
+```
+
+**Agent Options:**
+- `--confirm`: Request confirmation before each action (default: true)
+- `--dry-run`: Show planned actions without executing
+- `--output=<dir>`: Specify output directory for generated files
+- `--max-steps=<n>`: Maximum number of execution steps
+
+#### 🎭 Editor Mode - Interactive Learning Sessions
+AI observes and learns from user actions:
+```bash
+runix ai editor "test-creation-session"
+runix ai editor --continuous --learn-mode
+```
+
+#### 🔍 Analyze Mode - Data & File Analysis
+Analyze files, logs, data, or system state:
+```bash
+runix ai analyze "logs/error.log" --type=logs
+runix ai analyze "src/" --type=code --output=html
+runix ai analyze "test-results.json" --depth=deep
+```
+
+**Analysis Types:**
+- `logs`: Log file analysis and error detection
+- `code`: Code quality and architecture analysis
+- `data`: Data structure and pattern analysis
+- `performance`: Performance metrics and bottlenecks
+
+#### 📋 Plan Mode - Strategic Planning & Architecture
+Generate comprehensive plans and strategies:
+```bash
+runix ai plan "E2E testing strategy for microservices"
+runix ai plan "Test automation architecture" --scope=system
+runix ai plan "User onboarding flow tests" --format=markdown
+```
+
+**Planning Scopes:**
+- `feature`: Single feature planning
+- `project`: Project-level strategy
+- `system`: System architecture
+- `architecture`: Technical architecture design
+
+#### ⚡ Execute Mode - Command Generation & Execution
+Generate and execute command sequences:
+```bash
+runix ai execute "Set up test database with sample data" --review
+runix ai execute "Run all integration tests and generate report"
+runix ai execute "Deploy to staging environment" --batch
+```
+
+**Execute Options:**
+- `--review`: Review commands before execution
+- `--batch`: Execute multiple related commands
+- `--save-script`: Save generated commands as script
+- `--dry-run`: Show commands without executing
+
+#### 👁️ Observe Mode - Continuous Monitoring
+Monitor system, tests, or processes with AI insights:
+```bash
+runix ai observe --continuous --alert-on="error_rate>5%"
+runix ai observe --interval=60s
+```
+
+**Observe Options:**
+- `--continuous`: Run continuously until stopped
+- `--alert-on`: Specify conditions for alerts
+- `--interval`: Observation interval (default: 30s)
+
+### Configuration
+
+**Environment Variables:**
+```bash
+# AI Model Configuration
+AI_DEFAULT_MODEL=gpt-4o-mini
+AI_COMPUTER_USE_MODEL=gpt-4o-with-canvas
+AI_VISION_MODEL=gpt-4o-mini
+AI_MAX_TOKENS=2000
+AI_TEMPERATURE=0.7
+
+# OpenAI API
+OPENAI_API_KEY=your_api_key_here
+
+# Alternative Providers (if supported)
+ANTHROPIC_API_KEY=your_anthropic_key
+GOOGLE_API_KEY=your_google_key
+```
+
+**Driver Configuration:**
 ```json
 {
   "provider": "openai",
-  "model": "gpt-3.5-turbo",
+  "model": "gpt-4o-mini",
   "temperature": 0.7,
-  "maxTokens": 1000
+  "maxTokens": 2000,
+  "enableVision": true,
+  "enableComputerUse": true,
+  "outputDir": "./ai-artifacts"
 }
 ```
+
+### Usage Examples
+
+**Complete AI Workflow:**
+```bash
+# 1. Start with analysis
+runix ai analyze "current-project"
+
+# 2. Get strategic guidance  
+runix ai plan "Comprehensive testing strategy"
+
+# 3. Use agent for implementation
+runix ai agent "Implement the testing plan" --confirm
+
+# 4. Monitor results
+runix ai observe --continuous
+```
+
+**Feature File Integration:**
+```gherkin
+Feature: AI-Powered Testing
+  Scenario: AI assists with test creation
+    Given I start a new AI session
+    When I ask "How to test user authentication?"
+    Then I should receive a detailed response
+    And I use AI agent mode to "Create authentication tests"
+    And I verify the operation should be successful
+```
+
+**Available Gherkin Steps:**
+```gherkin
+# Basic AI interaction
+Given I ask "question text"
+When I use AI agent mode to "task description"
+Then I should receive a response
+
+# AI mode management  
+Given I set AI mode to "ask"
+When I start a new session
+Then the operation should be successful
+
+# Analysis and verification
+When I analyze the screen
+Then the result should be "expected_result"
+And I should receive a response
+```
+
+### Advanced Features
+
+**Multi-Modal Capabilities:**
+- Screenshot analysis and UI understanding
+- Text extraction and processing
+- System state monitoring
+- Performance analysis
+
+**Intelligent Planning:**
+- Task decomposition and sequencing
+- Risk assessment and mitigation
+- Resource requirement analysis
+- Timeline estimation
+
+**Learning and Adaptation:**
+- User behavior pattern recognition
+- Workflow optimization suggestions
+- Error prediction and prevention
+- Knowledge base building
+
+### Performance and Monitoring
+
+**Token Usage Tracking:**
+```bash
+# Check AI configuration and usage
+runix ai config --check
+
+# View token consumption
+runix ai analyze "usage-stats" --type=performance
+```
+
+**Error Handling:**
+- Automatic retry with exponential backoff
+- Graceful degradation for API failures
+- Comprehensive error logging
+- Fallback to cached responses
+
+### Integration with Other Drivers
+
+The AI Driver seamlessly integrates with all other Runix drivers:
+
+- **System Driver**: AI can control desktop applications
+- **Web Driver**: AI can analyze web pages and perform actions
+- **Vision Driver**: Enhanced OCR and visual analysis
+- **API Drivers**: Intelligent API testing and validation
 
 ### Vision Driver
 

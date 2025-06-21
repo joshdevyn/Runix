@@ -1,0 +1,14 @@
+{
+  "level": "high",
+  "report-type": "important",
+  "allowlist": [
+  ],
+  "advisories": [
+  ],
+  "whitelist": [
+  ],
+  "path-whitelist": [
+    "scripts/**",
+    "docs/**"
+  ]
+}

@@ -12,7 +12,7 @@ const possibleEnvPaths = [
   path.join(__dirname, '.env'),                    // Local .env in binary dir
   path.join(__dirname, '../../.env'),              // Original Runix root
   path.join(__dirname, '../../../.env'),           // From bin/drivers/ai-driver to root
-  path.join(process.cwd(), '.env'),                // Current working directory  'C:\\_Runix\\.env'                               // Absolute path as fallback
+  path.join(process.cwd(), '.env'),                // Current working directory
 ];
 
 let envLoaded = false;
@@ -39,17 +39,80 @@ function createDriverLogger() {
     return 'unknown';
   };
 
+  // Base64 truncation utilities
+  const isBase64String = (str) => {
+    if (typeof str !== 'string' || str.length < 50) return false;
+    if (str.startsWith('data:image/')) return true;
+    const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+    return base64Regex.test(str) && str.length > 100;
+  };
+
+  const isBase64Field = (fieldName) => {
+    const base64FieldNames = [
+      'image', 'screenshot', 'data', 'content', 'base64', 'src', 
+      'imageData', 'screenshotData', 'capturedImage', 'blob'
+    ];
+    const lowerFieldName = fieldName.toLowerCase();
+    return base64FieldNames.some(name => lowerFieldName.includes(name));
+  };
+
+  const truncateBase64Content = (obj, maxLength = 100) => {
+    // Check environment variable for full base64 logging
+    const showFullBase64 = process.env.RUNIX_LOG_FULL_BASE64 === 'true';
+    
+    if (showFullBase64) {
+      return obj;
+    }
+
+    if (typeof obj === 'string') {
+      if (isBase64String(obj)) {
+        return obj.length > maxLength 
+          ? `${obj.substring(0, maxLength)}...[truncated base64, ${obj.length} chars total]`
+          : obj;
+      }
+      return obj;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.map(item => truncateBase64Content(item, maxLength));
+    }
+
+    if (obj && typeof obj === 'object') {
+      const result = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (typeof value === 'string' && isBase64Field(key) && isBase64String(value)) {
+          result[key] = value.length > maxLength 
+            ? `${value.substring(0, maxLength)}...[truncated base64, ${value.length} chars total]`
+            : value;
+        } else {
+          result[key] = truncateBase64Content(value, maxLength);
+        }
+      }
+      return result;
+    }
+
+    return obj;
+  };
+
   return {
     log: (message, data = {}) => {
       const caller = getCallerInfo();
       const timestamp = new Date().toISOString();
-      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      let dataStr = '';
+      if (Object.keys(data).length > 0) {
+        const processedData = truncateBase64Content(data);
+        dataStr = ` ${JSON.stringify(processedData)}`;
+      }
       console.log(`${timestamp} [INFO] [index.js::AIDriver::${caller}] ${message}${dataStr}`);
     },
     error: (message, data = {}) => {
       const caller = getCallerInfo();
       const timestamp = new Date().toISOString();
-      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      let dataStr = '';
+      if (Object.keys(data).length > 0) {
+        const processedData = truncateBase64Content(data);
+        dataStr = ` ${JSON.stringify(processedData)}`;
+      }
       console.error(`${timestamp} [ERROR] [index.js::AIDriver::${caller}] ${message}${dataStr}`);
     }
   };
@@ -57,13 +120,85 @@ function createDriverLogger() {
 
 const logger = createDriverLogger();
 
-// Get port from environment variable (assigned by engine) or use default for standalone
-const port = parseInt(process.env.RUNIX_DRIVER_PORT || '9001', 10);
+// CLI Command Handling
+const args = process.argv.slice(2);
+const command = args[0];
+
+// Handle CLI commands for driver management
+if (command) {
+  switch (command) {
+    case '--ping':
+    case 'ping':
+      console.log('AI Driver is responsive');
+      process.exit(0);
+      break;
+      
+    case '--shutdown':
+    case 'shutdown':
+      console.log('Shutting down AI Driver via CLI command');
+      process.exit(0);
+      break;
+      
+    case '--health':
+    case 'health':
+      console.log(JSON.stringify({
+        status: 'healthy',
+        pid: process.pid,
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        timestamp: new Date().toISOString()
+      }, null, 2));
+      process.exit(0);
+      break;
+      
+    case '--help':
+    case 'help':
+      console.log(`
+AI Driver CLI Commands:
+  --ping, ping       Check if driver is responsive
+  --shutdown        Shutdown the driver
+  --health          Show driver health status
+  --help            Show this help message
+  --port=<port>     Set the port (can also use RUNIX_DRIVER_PORT env var)
+  
+Environment Variables:
+  RUNIX_DRIVER_PORT                   Driver port (default: 9001)
+  RUNIX_DRIVER_HEARTBEAT_ENABLED      Enable heartbeat monitoring (default: true)
+  RUNIX_DRIVER_HEARTBEAT_INTERVAL     Heartbeat interval in ms (default: 30000)
+  RUNIX_DRIVER_AUTO_SHUTDOWN_ENABLED  Enable auto-shutdown (default: true)
+  RUNIX_DRIVER_AUTO_SHUTDOWN_TIMEOUT  Auto-shutdown timeout in ms (default: 300000)
+  OPENAI_API_KEY                      OpenAI API key
+  AI_DEFAULT_MODEL                    Default AI model (default: gpt-4o-mini)
+`);
+      process.exit(0);
+      break;
+  }
+}
+
+// Parse port from command line if provided
+const portArg = args.find(arg => arg.startsWith('--port='));
+const port = portArg 
+  ? parseInt(portArg.split('=')[1], 10) 
+  : parseInt(process.env.RUNIX_DRIVER_PORT || '9001', 10);
+
 const manifest = require('./driver.json');
 
-// Initialize OpenAI client
+// Initialize OpenAI client with professional configuration
 const apiKey = process.env.OPENAI_API_KEY || 'test_key';
-logger.log('OpenAI API Key loaded', { keyPreview: apiKey ? apiKey.substring(0, 20) + '...' : 'NOT SET' });
+const defaultModel = process.env.AI_DEFAULT_MODEL || 'gpt-4o-mini';
+const computerUseModel = process.env.AI_COMPUTER_USE_MODEL || 'gpt-4o-with-canvas';
+const visionModel = process.env.AI_VISION_MODEL || 'gpt-4o-mini';
+const maxTokens = parseInt(process.env.AI_MAX_TOKENS || '2000');
+const temperature = parseFloat(process.env.AI_TEMPERATURE || '0.7');
+
+logger.log('OpenAI configuration loaded', { 
+  keyPreview: apiKey ? apiKey.substring(0, 20) + '...' : 'NOT SET',
+  defaultModel,
+  computerUseModel,
+  visionModel,
+  maxTokens,
+  temperature
+});
 
 const openai = new OpenAI({
   apiKey: apiKey,
@@ -90,11 +225,15 @@ const wss = new WebSocket.Server({ server });
 wss.on('connection', (ws, request) => {
   const clientUrl = url.parse(request.url, true);
   logger.log('WebSocket connection established', { url: clientUrl.pathname });
-
   ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message.toString());
       logger.log('Received message', data);
+      
+      // Update heartbeat on any engine communication
+      if (typeof updateHeartbeat === 'function') {
+        updateHeartbeat();
+      }
       
       const response = await handleMessage(data);
       if (response) {
@@ -156,13 +295,39 @@ async function handleMessage(request) {
         return handleIntrospect(request.id, request.params?.type || 'steps');
 
       case 'execute':
-        return handleExecute(request.id, request.params?.action, request.params?.args || []);
-
-      case 'health':
+        return handleExecute(request.id, request.params?.action, request.params?.args || []);      case 'health':
         return {
           id: request.id,
           type: 'response',
-          result: { status: 'ok' }
+          result: { 
+            status: 'ok',
+            pid: process.pid,
+            uptime: process.uptime(),
+            memory: process.memoryUsage(),
+            heartbeat: {
+              enabled: HEARTBEAT_ENABLED,
+              lastHeartbeat: lastHeartbeat ? new Date(lastHeartbeat).toISOString() : null,
+              timeSinceLastHeartbeat: lastHeartbeat ? Date.now() - lastHeartbeat : null,
+              autoShutdownEnabled: AUTO_SHUTDOWN_ENABLED,
+              autoShutdownTimeout: AUTO_SHUTDOWN_TIMEOUT
+            },
+            timestamp: new Date().toISOString()
+          }
+        };
+
+      case 'heartbeat':
+        // Explicit heartbeat endpoint
+        if (typeof updateHeartbeat === 'function') {
+          updateHeartbeat();
+        }
+        return {
+          id: request.id,
+          type: 'response',
+          result: { 
+            heartbeat: 'updated',
+            timestamp: new Date().toISOString(),
+            nextAutoShutdown: lastHeartbeat ? new Date(lastHeartbeat + AUTO_SHUTDOWN_TIMEOUT).toISOString() : null
+          }
         };
 
       case 'shutdown':
@@ -185,34 +350,38 @@ async function handleExecute(id, action, args) {
     case 'introspect':
       const introspectParams = args[0] || {};
       return handleIntrospect(id, introspectParams.type || 'steps');
-        case 'ask':
+    case 'ask':
       try {
         const question = args[0];
         if (!question) {
           return sendErrorResponse(id, 400, 'Question parameter is required');
         }
         
-        logger.log('Making OpenAI API call', { question });
+        logger.log('Making OpenAI API call', { question, model: defaultModel });
         
         const completion = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
+          model: defaultModel,
           messages: [
             {
               role: "system",
-              content: "You are a helpful AI assistant. Provide clear, concise, and accurate responses to user questions."
+              content: "You are a helpful AI assistant integrated into the Runix automation platform. Provide clear, concise, and accurate responses to user questions. When appropriate, suggest automation solutions or testing strategies."
             },
             {
               role: "user",
               content: question
             }
           ],
-          max_tokens: 1000,
-          temperature: 0.7
+          max_tokens: maxTokens,
+          temperature: temperature
         });
         
         const aiResponse = completion.choices[0]?.message?.content || 'No response generated';
         
-        logger.log('OpenAI API response received', { response: aiResponse.substring(0, 100) + '...' });
+        logger.log('OpenAI API response received', { 
+          response: aiResponse.substring(0, 100) + '...',
+          model: defaultModel,
+          tokensUsed: completion.usage?.total_tokens || 0
+        });
         
         return {
           id,
@@ -222,7 +391,8 @@ async function handleExecute(id, action, args) {
             data: {
               response: aiResponse,
               question: question,
-              model: "gpt-3.5-turbo",
+              model: defaultModel,
+              tokensUsed: completion.usage?.total_tokens || 0,
               timestamp: new Date().toISOString()
             }
           }
@@ -324,33 +494,104 @@ async function handleExecute(id, action, args) {
           task: context.task, 
           environment: context.environment,
           hasScreenshot: !!context.currentScreenshot 
-        });
-        
-        // Create a comprehensive prompt for computer use decision making
+        });        // Create a comprehensive prompt for computer use decision making
         const systemPrompt = `You are an AI agent that controls a computer to complete tasks. You can see screenshots and must decide what action to take next.
 
 Available actions:
 - click: Click at coordinates {"type": "click", "x": number, "y": number}
 - double_click: Double-click at coordinates {"type": "double_click", "x": number, "y": number}  
 - type: Type text {"type": "type", "text": "string"}
-- key: Press a key {"type": "key", "key": "Enter|Tab|Escape|etc"}
+- key: Press a key {"type": "key", "key": "keyname"}
 - scroll: Scroll at position {"type": "scroll", "x": number, "y": number, "scrollY": number}
 - wait: Wait for changes {"type": "wait", "duration": number}
 - task_complete: Task is finished {"type": "task_complete"}
 
-Analyze the screenshot and respond with ONLY a JSON object containing:
+AVAILABLE KEYS (use exact names):
+Basic keys: Enter, Return, Space, Tab, Escape, Backspace, Delete
+Arrow keys: ArrowUp, ArrowDown, ArrowLeft, ArrowRight
+Navigation: Home, End, PageUp, PageDown
+Function keys: F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12
+Modifiers: Win, Windows, Meta, Control, Ctrl, Alt, Shift
+Special: PrintScreen, Insert, CapsLock, NumLock, ScrollLock
+Letters: A-Z (use capital letters like "A", "B", "C")
+Numbers: 0-9 (use as strings like "1", "2", "3")
+
+KEY COMBINATIONS:
+- For combinations, use modifiers array: {"type": "key", "key": "R", "modifiers": ["Win"]}
+- Common combinations: Win+R (Run dialog), Ctrl+C (copy), Ctrl+V (paste), Alt+Tab (switch windows)
+
+CRITICAL EFFICIENCY RULES:
+- Complete tasks in minimum steps possible - avoid unnecessary actions
+- If you see the desired application already open, mark task complete immediately
+- NEVER repeat the same failed action more than twice - try alternatives
+- Don't click randomly or repeat failed actions
+- If an action didn't work as expected, try a different approach immediately
+
+SIMPLE TASKS - RECOGNIZE AND COMPLETE IMMEDIATELY:
+- "take a screenshot" or "capture screen" = Press PrintScreen key ONCE and mark complete
+- "take screenshot" = {"type": "key", "key": "PrintScreen"} then {"type": "task_complete"}
+- Screenshots are captured to clipboard/files automatically when PrintScreen is pressed
+- Don't try to open screenshot applications or save files manually
+- IMPORTANT: For screenshot tasks, return TWO actions: PrintScreen key press + task_complete
+
+WINDOWS APPLICATION OPENING STRATEGIES (try in order):
+1. PRIMARY: Win key + type app name + Enter
+2. FALLBACK 1: Win+R (Run dialog) + type app name + Enter
+3. FALLBACK 2: Direct click on Start button + search + click result
+4. FALLBACK 3: Look for app icons on taskbar or desktop and click them
+
+SPECIFIC APPLICATION COMMANDS:
+- Notepad: Try "notepad", "notepad.exe", or click Start menu → search "notepad"
+- Calculator: Try "calc", "calculator", "calc.exe"
+- File Explorer: Try "explorer", "file explorer", Win+E
+- Command Prompt: Try "cmd", "command prompt", Win+R → "cmd"
+
+FAILURE DETECTION:
+- If you've tried Win+type+Enter 2+ times and don't see the app, switch to Win+R approach
+- If you see Windows Search/Explorer instead of your target app, try Win+R approach
+- If you see the same screen after multiple attempts, change strategy immediately
+
+Task completion validation:
+- Only mark task complete when you can CLEARLY see the target application window open
+- Look for window titles, application interfaces, or distinctive UI elements
+- For Notepad: Look for "Notepad" in title bar or typical text editor interface
+- For screenshot tasks: Mark complete IMMEDIATELY after pressing PrintScreen - screenshot capture is automatic
+- Don't assume - verify visually in the screenshot unless it's a simple single-action task
+
+SCREENSHOT TASK COMPLETION:
+- If task is "take a screenshot" or similar, press PrintScreen ONCE and mark isComplete: true
+- Use action sequence: [{"type": "key", "key": "PrintScreen"}, {"type": "task_complete"}]
+- Screenshots are automatically saved when PrintScreen is pressed
+- NO need to verify or check for screenshot files - trust that the system captured it
+- NEVER type commands or open applications for screenshot tasks - just press PrintScreen key
+
+You can return EITHER a single action OR a sequence of actions:
+
+Single action:
 {
-  "reasoning": "Why you chose this action",
+  "reasoning": "Brief explanation of what you see and your next action",
   "action": {"type": "action_type", ...action_parameters},
   "isComplete": false or true if task is done
 }
 
-Be precise with coordinates. Look carefully at the screenshot to understand the current state.`;
+Action sequence (for efficiency):
+{
+  "reasoning": "Brief explanation of your planned sequence", 
+  "actions": [
+    {"type": "key", "key": "Win"},
+    {"type": "type", "text": "notepad"},
+    {"type": "key", "key": "Enter"}
+  ],
+  "isComplete": false
+}
 
-        const userPrompt = `Task: ${context.task}
+IMPORTANT: Look at your recent attempts in the iteration history. If you've failed 2+ times with the same approach, try a different method!`;
+
+        const iterationCount = context.iterationHistory?.length || 0;        const userPrompt = `Task: ${context.task}
 
 Current environment: ${context.environment || 'desktop'}
 Display size: ${context.displaySize?.width || 1920}x${context.displaySize?.height || 1080}
+Iteration: ${iterationCount + 1}/5 - BE EFFICIENT!
 
 ${context.iterationHistory?.length ? `Recent actions: ${JSON.stringify(context.iterationHistory.slice(-2))}` : 'No previous actions.'}
 
@@ -375,19 +616,24 @@ What should I do next to complete this task? Respond with JSON only.`;
                 }
               }
             ]
-          }
-        ];
+          }        ];
+          
+        // Rate limit handling with exponential backoff
+        let retryCount = 0;
+        const maxRetries = 3;
+        let baseDelay = 1000; // Start with 1 second
         
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4o", // Use GPT-4 with vision for screenshot analysis
-          messages: messages,
-          max_tokens: 500,
-          temperature: 0.1 // Low temperature for consistent decisions
-        });
-        
-        const aiResponse = completion.choices[0]?.message?.content || '{}';
-        
-        // Parse the JSON response
+        while (retryCount <= maxRetries) {
+          try {
+            const completion = await openai.chat.completions.create({
+              model: visionModel, // Use vision-capable model for screenshot analysis
+              messages: messages,
+              max_tokens: Math.min(maxTokens, 2000), // Reduce tokens to avoid rate limits
+              temperature: 0.1 // Low temperature for consistent decisions
+            });
+            
+            const aiResponse = completion.choices[0]?.message?.content || '{}';
+                  // Parse the JSON response
         let decisionResult;
         try {
           decisionResult = JSON.parse(aiResponse.trim());
@@ -400,24 +646,42 @@ What should I do next to complete this task? Respond with JSON only.`;
             throw new Error(`Invalid JSON response: ${aiResponse}`);
           }
         }
-        
-        logger.log('AI decision made', { 
-          reasoning: decisionResult.reasoning,
-          actionType: decisionResult.action?.type,
-          isComplete: decisionResult.isComplete
-        });
-        
-        return {
-          id,
-          type: 'response',
-          result: {
-            success: true,
-            data: decisionResult
+            
+            logger.log('AI decision made', { 
+              reasoning: decisionResult.reasoning,
+              actionType: decisionResult.action?.type,
+              isComplete: decisionResult.isComplete,
+              retryCount: retryCount
+            });
+            
+            return {
+              id,
+              type: 'response',
+              result: {
+                success: true,
+                data: decisionResult
+              }
+            };
+            
+          } catch (error) {
+            // Check if it's a rate limit error
+            if (error.message.includes('429') || error.message.includes('Rate limit')) {
+              retryCount++;
+              if (retryCount <= maxRetries) {
+                const delay = baseDelay * Math.pow(2, retryCount - 1); // Exponential backoff
+                logger.log(`Rate limit hit, retrying in ${delay}ms (attempt ${retryCount}/${maxRetries})`, { error: error.message });
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+              }
+            }
+              logger.error('Screen analysis and decision error', { error: error.message, retryCount });
+            return sendErrorResponse(id, 500, `Decision making error: ${error.message}`);
           }
-        };
-      } catch (error) {
-        logger.error('Screen analysis and decision error', { error: error.message });
-        return sendErrorResponse(id, 500, `Decision making error: ${error.message}`);
+        }
+      
+      } catch (outerError) {
+        logger.error('Screen analysis outer error', { error: outerError.message });
+        return sendErrorResponse(id, 500, `Decision making outer error: ${outerError.message}`);
       }
       
     default:
@@ -572,19 +836,97 @@ server.listen(port, () => {
   logger.log(`AI Driver server listening on port ${port}`);
 });
 
+// Heartbeat and Auto-Shutdown Configuration
+const HEARTBEAT_INTERVAL = parseInt(process.env.RUNIX_DRIVER_HEARTBEAT_INTERVAL || '30000'); // 30 seconds
+const AUTO_SHUTDOWN_TIMEOUT = parseInt(process.env.RUNIX_DRIVER_AUTO_SHUTDOWN_TIMEOUT || '300000'); // 5 minutes
+const HEARTBEAT_ENABLED = process.env.RUNIX_DRIVER_HEARTBEAT_ENABLED !== 'false'; // Default to true
+const AUTO_SHUTDOWN_ENABLED = process.env.RUNIX_DRIVER_AUTO_SHUTDOWN_ENABLED !== 'false'; // Default to true
+
+let lastHeartbeat = Date.now();
+let heartbeatInterval = null;
+let autoShutdownTimeout = null;
+
+// Update heartbeat timestamp (called when engine communicates with driver)
+function updateHeartbeat() {
+  lastHeartbeat = Date.now();
+  if (autoShutdownTimeout) {
+    clearTimeout(autoShutdownTimeout);
+  }
+  
+  if (AUTO_SHUTDOWN_ENABLED) {
+    autoShutdownTimeout = setTimeout(() => {
+      logger.log('Auto-shutdown timeout reached, no engine communication detected', {
+        timeoutMs: AUTO_SHUTDOWN_TIMEOUT,
+        lastHeartbeat: new Date(lastHeartbeat).toISOString()
+      });
+      gracefulShutdown('auto-shutdown');
+    }, AUTO_SHUTDOWN_TIMEOUT);
+  }
+}
+
+// Start heartbeat monitoring
+if (HEARTBEAT_ENABLED) {
+  logger.log('Starting heartbeat monitoring', {
+    heartbeatInterval: HEARTBEAT_INTERVAL,
+    autoShutdownTimeout: AUTO_SHUTDOWN_TIMEOUT,
+    heartbeatEnabled: HEARTBEAT_ENABLED,
+    autoShutdownEnabled: AUTO_SHUTDOWN_ENABLED
+  });
+  
+  heartbeatInterval = setInterval(() => {
+    const timeSinceLastHeartbeat = Date.now() - lastHeartbeat;
+    logger.log('Heartbeat check', {
+      timeSinceLastHeartbeat: timeSinceLastHeartbeat,
+      lastHeartbeat: new Date(lastHeartbeat).toISOString(),
+      status: timeSinceLastHeartbeat < AUTO_SHUTDOWN_TIMEOUT ? 'healthy' : 'timeout-pending'
+    });
+  }, HEARTBEAT_INTERVAL);
+  
+  // Initialize heartbeat
+  updateHeartbeat();
+}
+
+// Enhanced graceful shutdown function
+function gracefulShutdown(reason = 'unknown') {
+  logger.log(`Initiating graceful shutdown`, { reason });
+  
+  // Clear intervals and timeouts
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+  if (autoShutdownTimeout) {
+    clearTimeout(autoShutdownTimeout);
+    autoShutdownTimeout = null;
+  }
+  
+  // Close WebSocket server
+  if (wss) {
+    wss.close(() => {
+      logger.log('WebSocket server closed');
+    });
+  }
+  
+  // Close HTTP server
+  server.close(() => {
+    logger.log('HTTP server closed', { reason });
+    process.exit(0);
+  });
+  
+  // Force exit after 5 seconds if graceful shutdown fails
+  setTimeout(() => {
+    logger.error('Forced shutdown after timeout', { reason });
+    process.exit(1);
+  }, 5000);
+}
+
 // Handle process termination
 process.on('SIGINT', () => {
   logger.log('Received SIGINT, shutting down gracefully');
-  server.close(() => {
-    logger.log('Server closed');
-    process.exit(0);
-  });
+  gracefulShutdown('SIGINT');
 });
 
 process.on('SIGTERM', () => {
   logger.log('Received SIGTERM, shutting down gracefully');
-  server.close(() => {
-    logger.log('Server closed');
-    process.exit(0);
-  });
+  gracefulShutdown('SIGTERM');
 });

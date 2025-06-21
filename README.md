@@ -33,6 +33,9 @@ Runix is a powerful, production-ready automation engine that runs behavior-drive
 - 📊 **Detailed Reports**: Generate comprehensive test reports with visual artifacts
 - 🧩 **Plugin Architecture**: Easy driver development and deployment with hot-loading
 - 🤖 **AI-Driven Automation**: Real OpenAI integration with agent, ask, and editor modes for intelligent task completion
+- 🔄 **Workflow Recording & Replay**: AI agents automatically generate `.feature` files for reproducible automation
+- 🎤 **Voice-Controlled Automation**: Natural language voice commands for hands-free workflow creation (coming soon)
+- ✏️ **Interactive Workflow Editor**: Learn-by-doing interface that converts manual actions to Gherkin steps (coming soon)
 - 🧠 **AI Orchestration**: Intelligent step generation and workflow optimization (coming soon)
 - 🏢 **Enterprise Scaling**: Distributed driver execution for large-scale automation
 - 🔄 **CI/CD Integration**: Ready for your continuous integration pipeline
@@ -41,6 +44,35 @@ Runix is a powerful, production-ready automation engine that runs behavior-drive
 - 🛡️ **Production Stability**: Robust error handling with unhandled rejection management and graceful driver recovery
 - ✅ **Web Driver Optimization**: 76% comprehensive test coverage (114/150 tests passing) for web automation with continuous improvement
 - 🎯 **Multi-Driver Excellence**: AI, system, vision, and example drivers are fully stable and production-ready
+
+## 🧠 The Genius of the Runix Engine
+
+Runix represents a paradigm shift in automation engineering with its **self-recording, self-improving automation ecosystem**:
+
+### 🔄 **AI → Feature → Replay Cycle**
+```
+   User Task Request
+         ↓
+   🤖 AI Agent Execution
+         ↓
+   📝 Auto-Generated .feature File  
+         ↓
+   🔄 Reproducible Automation
+         ↓
+   ✏️ Human Refinement (Optional)
+         ↓
+   🎯 Production Workflow
+```
+
+### 🌟 **Revolutionary Capabilities**
+
+1. **🎭 Self-Documenting Automation**: AI agents don't just complete tasks—they automatically document every action as reproducible Gherkin scenarios
+2. **🎤 Voice-to-Workflow Pipeline**: Speak your automation needs, watch AI convert them to executable workflows (coming soon)
+3. **✏️ Learn-by-Doing Interface**: Manual actions get automatically converted to reusable automation scripts (coming soon)
+4. **🔄 Continuous Improvement**: AI learns from successful workflows to optimize future task completion
+
+### 🎯 **The Vision**
+**"Democratize automation creation through AI"** - No more writing complex scripts. Simply describe what you want, let AI do it, and get a permanent workflow you can run forever.
 
 ## 🏗️ Architecture
 
@@ -315,22 +347,121 @@ Runix includes an advanced AI driver with real OpenAI integration for intelligen
 
 **Coming Soon**: Advanced orchestration features including automatic workflow generation, multi-driver coordination, and intelligent step sequencing.
 
+### Future AI Enhancements 🚀
+
+Runix offers several advanced AI modes to enhance automation and testing processes. These modes are planned for future releases:
+
+1. **Test Generation Mode**: Automatically generates test cases based on application specifications or user interactions.
+2. **Test Optimization Mode**: Analyzes existing test cases to identify redundant or inefficient tests, suggesting improvements.
+3. **Self-Healing Mode**: Automatically updates test scripts when changes in the application occur, minimizing maintenance efforts.
+4. **Predictive Analytics Mode**: Uses historical data to predict potential issues or areas of risk in the application before they occur.
+
+For specific use cases or to implement these modes effectively, consider integrating them into your testing workflows for optimized results.
+
 ### AI CLI Commands
 
 The AI system operates in multiple modes accessible through the CLI:
 
 ```bash
-# Agent Mode - Autonomous task completion
-runix ai agent "Complete the login form and navigate to dashboard"
+# Agent Mode - Autonomous task completion with automatic .feature file generation
+runix ai agent "Complete the login form and navigate to dashboard" --max-iterations=10
 
 # Ask Mode - Direct question/answer with AI assistance  
 runix ai ask "What elements can I interact with on this screen?"
 
-# Editor Mode - Learn from user actions
-runix ai editor "user-workflow-session"
+# Editor Mode - Interactive workflow creation and editing (🚧 Coming Soon)
+runix ai editor "create-login-workflow"        # Create new workflow
+runix ai editor --edit "existing-workflow.feature"  # Edit existing workflow
+runix ai editor --voice "voice-recorded-workflow"   # Voice-controlled editing
+
+# Voice Control Mode - Natural language automation with real-time announcements ✅
+runix ai voice "Click the login button and enter my credentials"
+runix ai voice --listen                        # Start voice listening mode
+
+# Replay Mode - Execute AI-generated workflows
+runix run templates/ai-recorded-workflow.feature
 
 # Configuration check
 runix ai config --check
+```
+
+### 🎭 AI Mode Capabilities
+
+#### ✅ **Agent Mode** (Production Ready)
+- **Autonomous Task Completion**: AI performs complex multi-step tasks
+- **Automatic Replay Generation**: Records all actions into `.feature` files for replay
+- **Screenshot Integration**: Visual context for AI decision-making
+- **Safety Controls**: ESC to stop, user input pauses agent for 10 seconds
+- **Comprehensive Logging**: Full execution reports and step-by-step logs
+- **🎤 Voice Announcements**: Real-time voice feedback for all agent actions (NEW)
+
+```bash
+# Agent mode with voice announcements
+RUNIX_VOICE_ENABLED=true runix ai agent "take a screenshot" --max-iterations=5
+# → AI speaks each action: "Starting taking screenshot", "Completed taking screenshot"
+# → Creates: templates/ai-recorded-workflow.feature
+# → Can replay with: runix run templates/ai-recorded-workflow.feature
+```
+
+#### 🚧 **Editor Mode** (Coming Soon)
+Revolutionary workflow creation and editing system:
+
+- **Interactive Workflow Builder**: Create `.feature` files through natural interaction
+- **Learn-by-Doing**: Perform actions manually, AI converts them to Gherkin steps
+- **Voice-Powered Editing**: Speak your automation intentions, AI writes the code
+- **Smart Completion**: AI completes partial workflows when stuck
+- **Real-time Preview**: See your `.feature` file update as you work
+
+```bash
+# Future editor mode capabilities
+runix ai editor --create "login-workflow"
+runix ai editor --voice --edit "checkout-process.feature"
+runix ai editor --complete "incomplete-workflow.feature"  # AI finishes partial workflows
+```
+
+#### ✅ **Voice Control Integration** (Production Ready - Announcements)
+Natural language automation control with real-time voice feedback:
+
+- **🎤 Action Announcements**: AI speaks each action as it performs it
+- **📢 Goal Setting**: AI announces the task goal when starting
+- **🧠 Thinking Phases**: AI narrates analysis and planning stages
+- **✅ Success/Error Feedback**: Clear voice indication of completion or failures
+- **🌍 Multi-language Support**: Configurable language and speech parameters
+
+```bash
+# Voice control environment variables
+export RUNIX_VOICE_ENABLED=true          # Enable/disable voice announcements
+export RUNIX_VOICE_RATE=1.0              # Speech rate (0.1-10.0)
+export RUNIX_VOICE_PITCH=1.0             # Speech pitch (0.1-2.0)
+export RUNIX_VOICE_VOLUME=1.0            # Speech volume (0.0-1.0)
+export RUNIX_VOICE_LANGUAGE=en-US        # Speech language
+
+# Voice-enabled agent execution
+runix ai agent "login to the application" --max-iterations=5
+# AI announces: "Goal set: login to the application"
+# AI announces: "Starting taking screenshot"
+# AI announces: "Completed taking screenshot"
+# AI announces: "Starting clicking at 450, 300"
+# AI announces: "Completed clicking at 450, 300"
+```
+
+### 🔄 Workflow Replay System
+
+The genius of the Runix engine: **AI Agent → Feature File → Reproducible Automation**
+
+```bash
+# 1. AI Agent performs task and auto-generates .feature file
+runix ai agent "complete user registration" --max-iterations=8
+
+# 2. Replay the exact same workflow anytime
+runix run templates/ai-recorded-workflow.feature
+
+# 3. Edit the generated workflow manually or with AI editor
+runix ai editor --edit templates/ai-recorded-workflow.feature
+
+# 4. Version control your AI-discovered workflows
+git add templates/ai-recorded-*.feature
+git commit -m "AI-discovered user registration workflow"
 ```
 
 ### AI Driver in Feature Files
@@ -376,6 +507,11 @@ export OPENAI_API_KEY="your-openai-api-key"
 export AI_DEFAULT_MODEL="gpt-3.5-turbo"
 export AI_TEMPERATURE="0.7"
 export AI_MAX_TOKENS="1000"
+
+# Agent timing configuration (milliseconds)
+export RUNIX_AGENT_ACTION_DELAY="2000"
+export RUNIX_AGENT_SEQUENCE_DELAY="2000"
+export RUNIX_AGENT_POST_ACTION_DELAY="3000"
 
 # Check configuration
 runix ai config --check

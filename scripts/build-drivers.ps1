@@ -9,6 +9,32 @@ param (
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+# Function to force release file handles
+function Clear-FileHandles {
+    param([string]$path)
+    
+    try {
+        # Force .NET garbage collection
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+        [System.GC]::Collect()
+        
+        # Try to use handle.exe if available (part of Sysinternals)
+        $handleExe = Get-Command "handle.exe" -ErrorAction SilentlyContinue
+        if ($handleExe -and (Test-Path $path)) {
+            try {
+                & handle.exe -p $PID -nobanner | Where-Object { $_ -like "*$path*" } | ForEach-Object {
+                    Write-Host "    Found open handle: $_"
+                }
+            } catch {
+                # Handle.exe not available or failed, continue
+            }
+        }
+    } catch {
+        # Ignore errors in cleanup
+    }
+}
+
 # Input validation
 if (-not $sourceDir -or -not $destDir) {
     Write-Error "Source and destination directories are required"
@@ -66,13 +92,44 @@ foreach ($driver in $drivers) {
     
     $sourcePath = $driver.FullName
     $destPath = Join-Path $driversDestDir $driverName
-    
-    try {
+      # Release any file handles that might be holding files
+    Clear-FileHandles -path $sourcePath
+    Clear-FileHandles -path $destPath
+      try {
         # Create destination with validation
         if (-not (Test-Path $destPath)) {
             New-Item -ItemType Directory -Force -Path $destPath | Out-Null
-        }        # Copy driver files from source to destination
-        Copy-Item -Path "$sourcePath\*" -Destination $destPath -Recurse -Force
+        }
+        
+        # Copy driver files with retry logic for locked files
+        $retryCount = 0
+        $maxRetries = 3
+        $copySuccess = $false
+        
+        while (-not $copySuccess -and $retryCount -lt $maxRetries) {
+            try {
+                # Force garbage collection to release file handles
+                [System.GC]::Collect()
+                [System.GC]::WaitForPendingFinalizers()
+                
+                # Small delay to allow file handles to release
+                if ($retryCount -gt 0) {
+                    Start-Sleep -Milliseconds (500 * $retryCount)
+                    Write-Host "    Retry $retryCount for $driverName..."
+                }
+                
+                # Copy driver files from source to destination
+                Copy-Item -Path "$sourcePath\*" -Destination $destPath -Recurse -Force -ErrorAction Stop
+                $copySuccess = $true
+                
+            } catch {
+                $retryCount++
+                if ($retryCount -ge $maxRetries) {
+                    throw "Failed to copy after $maxRetries attempts: $_"
+                }
+                Write-Warning "    Copy attempt $retryCount failed for $driverName, retrying..."
+            }
+        }
         
         # Determine the correct executable
         $executable = "index.js"  # Default fallback

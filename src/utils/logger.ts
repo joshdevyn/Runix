@@ -156,7 +156,6 @@ export class Logger {
     }
     return {};
   }
-
   private formatMessage(level: string, message: string, context: LogContext, data?: any): string {
     const timestamp = new Date().toISOString();
     const callerInfo = this.getCallerInfo();
@@ -200,8 +199,11 @@ export class Logger {
 
       if (typeof dataToLog === 'object' && dataToLog !== null) {
         try {
+          // Truncate base64 content before stringifying
+          const processedData = this.truncateBase64Content(dataToLog);
+          
           // Handle BigInts and other potential stringify issues
-          const serializedData = JSON.stringify(dataToLog, (key, value) =>
+          const serializedData = JSON.stringify(processedData, (key, value) =>
             typeof value === 'bigint' ? value.toString() : value
           );
           logLine += ` ${serializedData}`;
@@ -216,7 +218,64 @@ export class Logger {
     return logLine;
   }
 
-  private writeLog(level: string, message: string, context: LogContext = {}, data?: any): void {
+  private truncateBase64Content(obj: any, maxLength: number = 100): any {
+    // Check environment variable for full base64 logging
+    const showFullBase64 = process.env.RUNIX_LOG_FULL_BASE64 === 'true';
+    
+    if (showFullBase64) {
+      return obj;
+    }
+
+    if (typeof obj === 'string') {
+      // Check if string looks like base64 data
+      if (this.isBase64String(obj)) {
+        return obj.length > maxLength 
+          ? `${obj.substring(0, maxLength)}...[truncated base64, ${obj.length} chars total]`
+          : obj;
+      }
+      return obj;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.truncateBase64Content(item, maxLength));
+    }
+
+    if (obj && typeof obj === 'object') {
+      const result: any = {};
+      for (const [key, value] of Object.entries(obj)) {
+        // Check for common base64 field names
+        if (typeof value === 'string' && this.isBase64Field(key) && this.isBase64String(value)) {
+          result[key] = value.length > maxLength 
+            ? `${value.substring(0, maxLength)}...[truncated base64, ${value.length} chars total]`
+            : value;
+        } else {
+          result[key] = this.truncateBase64Content(value, maxLength);
+        }
+      }
+      return result;
+    }
+
+    return obj;
+  }
+
+  private isBase64String(str: string): boolean {
+    // Basic heuristics for base64 detection
+    if (str.length < 50) return false; // Too short to be meaningful base64
+    if (str.startsWith('data:image/')) return true; // Data URL
+    
+    // Check if string matches base64 pattern and is reasonably long
+    const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+    return base64Regex.test(str) && str.length > 100;
+  }
+
+  private isBase64Field(fieldName: string): boolean {
+    const base64FieldNames = [
+      'image', 'screenshot', 'data', 'content', 'base64', 'src', 
+      'imageData', 'screenshotData', 'capturedImage', 'blob'
+    ];
+    const lowerFieldName = fieldName.toLowerCase();
+    return base64FieldNames.some(name => lowerFieldName.includes(name));
+  }  private writeLog(level: string, message: string, context: LogContext = {}, data?: any): void {
     const formattedMessage = this.formatMessage(level, message, context, data);
     
     if (this.consoleEnabled) {
@@ -231,9 +290,56 @@ export class Logger {
     
     if (this.filePath) {
       try {
+        // Debug: Log file writing details
+        // console.log(`[DEBUG] Logger attempting to write to: ${this.filePath}`);
+        // console.log(`[DEBUG] File exists: ${fs.existsSync(this.filePath)}`);
+        // console.log(`[DEBUG] Directory exists: ${fs.existsSync(path.dirname(this.filePath))}`);
+        // console.log(`[DEBUG] Working directory: ${process.cwd()}`);
+        
+        // Write to main log file (append)
         fs.appendFileSync(this.filePath, formattedMessage + '\n');
+        // console.log(`[DEBUG] Successfully wrote to main log file`);
+        
+        // Also write to latest log file (creates a fresh log for each session)
+        const latestLogPath = this.getLatestLogPath(this.filePath);
+        if (latestLogPath) {
+          // console.log(`[DEBUG] Attempting to write to latest log: ${latestLogPath}`);
+          fs.appendFileSync(latestLogPath, formattedMessage + '\n');
+          // console.log(`[DEBUG] Successfully wrote to latest log file`);        
+        }
       } catch (error) {
-        console.error(`Failed to write to log file: ${error}`);
+        // console.error(`[DEBUG] Failed to write to log file: ${error}`);
+        // console.error(`[DEBUG] Error details:`, error);
+      }
+    }
+  }
+
+  private getLatestLogPath(originalPath: string): string | null {
+    try {
+      const dir = path.dirname(originalPath);
+      const ext = path.extname(originalPath);
+      const baseName = path.basename(originalPath, ext);
+      
+      // Create latest log filename: runix-dev.log -> runix-dev-latest.log
+      const latestLogPath = path.join(dir, `${baseName}-latest${ext}`);
+      return latestLogPath;
+    } catch (error) {
+      console.error(`Failed to generate latest log path: ${error}`);
+      return null;
+    }
+  }
+
+  public startNewSession(): void {
+    // Clear the latest log file to start fresh for this session
+    if (this.filePath) {
+      const latestLogPath = this.getLatestLogPath(this.filePath);
+      if (latestLogPath) {
+        try {
+          fs.writeFileSync(latestLogPath, ''); // Clear the file
+          this.info('New logging session started', { sessionType: 'latest' });
+        } catch (error) {
+          this.error('Failed to clear latest log file', {}, error);
+        }
       }
     }
   }

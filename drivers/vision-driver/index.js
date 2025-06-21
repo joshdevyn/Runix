@@ -1,6 +1,29 @@
 const WebSocket = require('ws');
 const http = require('http');
 const fs = require('fs').promises;
+const path = require('path');
+
+// Load .env from multiple possible locations
+const possibleEnvPaths = [
+  path.join(__dirname, '.env'),                    // Local .env in driver dir
+  path.join(__dirname, '../../.env'),              // Original Runix root
+  path.join(__dirname, '../../../.env'),           // From bin/drivers/vision-driver to root
+  path.join(process.cwd(), '.env'),                // Current working directory
+];
+
+let envLoaded = false;
+for (const envPath of possibleEnvPaths) {
+  try {
+    const fsSync = require('fs');
+    if (fsSync.existsSync(envPath)) {
+      require('dotenv').config({ path: envPath });
+      envLoaded = true;
+      break;
+    }
+  } catch (err) {
+    // Ignore errors and try next path
+  }
+}
 
 // Get port from environment variable (assigned by engine) or use default for standalone
 const port = parseInt(process.env.RUNIX_DRIVER_PORT || '9003', 10);
@@ -21,20 +44,312 @@ function createDriverLogger() {
     return 'unknown';
   };
 
+  // Base64 truncation utilities
+  const isBase64String = (str) => {
+    if (typeof str !== 'string' || str.length < 50) return false;
+    if (str.startsWith('data:image/')) return true;
+    const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+    return base64Regex.test(str) && str.length > 100;
+  };
+
+  const isBase64Field = (fieldName) => {
+    const base64FieldNames = [
+      'image', 'screenshot', 'data', 'content', 'base64', 'src', 
+      'imageData', 'screenshotData', 'capturedImage', 'blob'
+    ];
+    const lowerFieldName = fieldName.toLowerCase();
+    return base64FieldNames.some(name => lowerFieldName.includes(name));
+  };
+
+  const truncateBase64Content = (obj, maxLength = 100) => {
+    // Check environment variable for full base64 logging
+    const showFullBase64 = process.env.RUNIX_LOG_FULL_BASE64 === 'true';
+    
+    if (showFullBase64) {
+      return obj;
+    }
+
+    if (typeof obj === 'string') {
+      if (isBase64String(obj)) {
+        return obj.length > maxLength 
+          ? `${obj.substring(0, maxLength)}...[truncated base64, ${obj.length} chars total]`
+          : obj;
+      }
+      return obj;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.map(item => truncateBase64Content(item, maxLength));
+    }
+
+    if (obj && typeof obj === 'object') {
+      const result = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (typeof value === 'string' && isBase64Field(key) && isBase64String(value)) {
+          result[key] = value.length > maxLength 
+            ? `${value.substring(0, maxLength)}...[truncated base64, ${value.length} chars total]`
+            : value;
+        } else {
+          result[key] = truncateBase64Content(value, maxLength);
+        }
+      }
+      return result;
+    }
+
+    return obj;
+  };
+
   return {
     log: (message, data = {}) => {
       const caller = getCallerInfo();
       const timestamp = new Date().toISOString();
-      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      let dataStr = '';
+      if (Object.keys(data).length > 0) {
+        try {
+          const processedData = truncateBase64Content(data);
+          dataStr = ` ${JSON.stringify(processedData)}`;
+        } catch (e) {
+          dataStr = ' [UnserializableObject]';
+        }
+      }
       console.log(`${timestamp} [INFO] [index.js::VisionDriver::${caller}] ${message}${dataStr}`);
     },
     error: (message, data = {}) => {
       const caller = getCallerInfo();
       const timestamp = new Date().toISOString();
-      const dataStr = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+      let dataStr = '';
+      if (Object.keys(data).length > 0) {
+        try {
+          const processedData = truncateBase64Content(data);
+          dataStr = ` ${JSON.stringify(processedData)}`;
+        } catch (e) {
+          dataStr = ' [UnserializableObject]';
+        }
+      }
       console.error(`${timestamp} [ERROR] [index.js::VisionDriver::${caller}] ${message}${dataStr}`);
     }
   };
+}
+
+// Embedded Heartbeat Implementation for Vision Driver  
+class DriverHeartbeat {
+  constructor(options = {}) {
+    this.driverName = options.driverName || 'Vision';
+    this.logger = options.logger || logger;
+    this.server = options.server;
+    this.wss = options.wss;
+    
+    // Configuration from environment or defaults
+    this.heartbeatInterval = parseInt(process.env.RUNIX_DRIVER_HEARTBEAT_INTERVAL || '30000'); // 30 seconds
+    this.autoShutdownTimeout = parseInt(process.env.RUNIX_DRIVER_AUTO_SHUTDOWN_TIMEOUT || '300000'); // 5 minutes
+    this.heartbeatEnabled = process.env.RUNIX_DRIVER_HEARTBEAT_ENABLED !== 'false'; // Default to true
+    this.autoShutdownEnabled = process.env.RUNIX_DRIVER_AUTO_SHUTDOWN_ENABLED !== 'false'; // Default to true
+    
+    // State
+    this.lastHeartbeat = Date.now();
+    this.heartbeatIntervalId = null;
+    this.autoShutdownTimeoutId = null;
+    this.isShuttingDown = false;
+    
+    this.setupSignalHandlers();
+    this.start();
+  }
+  
+  updateHeartbeat() {
+    this.lastHeartbeat = Date.now();
+    
+    if (this.autoShutdownTimeoutId) {
+      clearTimeout(this.autoShutdownTimeoutId);
+    }
+    
+    if (this.autoShutdownEnabled && !this.isShuttingDown) {
+      this.autoShutdownTimeoutId = setTimeout(() => {
+        this.logger.log(`Auto-shutdown timeout reached, no engine communication detected`, {
+          timeoutMs: this.autoShutdownTimeout,
+          lastHeartbeat: new Date(this.lastHeartbeat).toISOString(),
+          driverName: this.driverName
+        });
+        this.gracefulShutdown('auto-shutdown');
+      }, this.autoShutdownTimeout);
+    }
+  }
+  
+  start() {
+    if (!this.heartbeatEnabled) {
+      this.logger.log('Heartbeat monitoring disabled', { driverName: this.driverName });
+      return;
+    }
+    
+    this.logger.log('Starting heartbeat monitoring', {
+      heartbeatInterval: this.heartbeatInterval,
+      autoShutdownTimeout: this.autoShutdownTimeout,
+      heartbeatEnabled: this.heartbeatEnabled,
+      autoShutdownEnabled: this.autoShutdownEnabled,
+      driverName: this.driverName
+    });
+    
+    this.heartbeatIntervalId = setInterval(() => {
+      const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
+      this.logger.log('Heartbeat check', {
+        timeSinceLastHeartbeat: timeSinceLastHeartbeat,
+        lastHeartbeat: new Date(this.lastHeartbeat).toISOString(),
+        status: timeSinceLastHeartbeat < this.autoShutdownTimeout ? 'healthy' : 'timeout-pending',
+        driverName: this.driverName
+      });
+    }, this.heartbeatInterval);
+    
+    // Initialize heartbeat
+    this.updateHeartbeat();
+  }
+  
+  stop() {
+    if (this.heartbeatIntervalId) {
+      clearInterval(this.heartbeatIntervalId);
+      this.heartbeatIntervalId = null;
+    }
+    if (this.autoShutdownTimeoutId) {
+      clearTimeout(this.autoShutdownTimeoutId);
+      this.autoShutdownTimeoutId = null;
+    }
+  }
+  
+  getStatus() {
+    return {
+      enabled: this.heartbeatEnabled,
+      lastHeartbeat: this.lastHeartbeat ? new Date(this.lastHeartbeat).toISOString() : null,
+      timeSinceLastHeartbeat: this.lastHeartbeat ? Date.now() - this.lastHeartbeat : null,
+      autoShutdownEnabled: this.autoShutdownEnabled,
+      autoShutdownTimeout: this.autoShutdownTimeout,
+      nextAutoShutdown: this.lastHeartbeat ? new Date(this.lastHeartbeat + this.autoShutdownTimeout).toISOString() : null,
+      driverName: this.driverName
+    };
+  }
+  
+  gracefulShutdown(reason = 'unknown') {
+    if (this.isShuttingDown) {
+      this.logger.log('Shutdown already in progress, ignoring', { reason, driverName: this.driverName });
+      return;
+    }
+    
+    this.isShuttingDown = true;
+    this.logger.log(`Initiating graceful shutdown`, { reason, driverName: this.driverName });
+    
+    // Stop heartbeat monitoring
+    this.stop();
+    
+    // Close WebSocket server
+    if (this.wss) {
+      this.wss.close(() => {
+        this.logger.log('WebSocket server closed', { driverName: this.driverName });
+      });
+    }
+    
+    // Close HTTP server
+    if (this.server) {
+      this.server.close(() => {
+        this.logger.log('HTTP server closed', { reason, driverName: this.driverName });
+        process.exit(0);
+      });
+    } else {
+      this.logger.log('No server to close, exiting directly', { reason, driverName: this.driverName });
+      process.exit(0);
+    }
+    
+    // Force exit after 5 seconds if graceful shutdown fails
+    setTimeout(() => {
+      this.logger.error('Forced shutdown after timeout', { reason, driverName: this.driverName });
+      process.exit(1);
+    }, 5000);
+  }
+  
+  setupSignalHandlers() {
+    process.on('SIGINT', () => {
+      this.logger.log('Received SIGINT, shutting down gracefully', { driverName: this.driverName });
+      this.gracefulShutdown('SIGINT');
+    });
+
+    process.on('SIGTERM', () => {
+      this.logger.log('Received SIGTERM, shutting down gracefully', { driverName: this.driverName });
+      this.gracefulShutdown('SIGTERM');
+    });
+    
+    // Handle uncaught exceptions
+    process.on('uncaughtException', (error) => {
+      this.logger.error('Uncaught exception, shutting down', { 
+        error: error.message, 
+        stack: error.stack,
+        driverName: this.driverName 
+      });
+      this.gracefulShutdown('uncaughtException');
+    });
+    
+    // Handle unhandled promise rejections
+    process.on('unhandledRejection', (reason, promise) => {
+      this.logger.error('Unhandled promise rejection, shutting down', { 
+        reason: reason?.toString?.() || 'unknown',
+        driverName: this.driverName 
+      });
+      this.gracefulShutdown('unhandledRejection');
+    });
+  }
+  
+  static handleCLICommands(driverName = 'unknown') {
+    const args = process.argv.slice(2);
+    const command = args[0];
+
+    if (command) {
+      switch (command) {
+        case '--ping':
+        case 'ping':
+          console.log(`${driverName} Driver is responsive`);
+          process.exit(0);
+          break;
+          
+        case '--shutdown':
+        case 'shutdown':
+          console.log(`Shutting down ${driverName} Driver via CLI command`);
+          process.exit(0);
+          break;
+          
+        case '--health':
+        case 'health':
+          console.log(JSON.stringify({
+            status: 'healthy',
+            driverName: driverName,
+            pid: process.pid,
+            uptime: process.uptime(),
+            memory: process.memoryUsage(),
+            timestamp: new Date().toISOString()
+          }, null, 2));
+          process.exit(0);
+          break;
+          
+        case '--help':
+        case 'help':
+          console.log(`
+${driverName} Driver CLI Commands:
+  --ping, ping       Check if driver is responsive
+  --shutdown        Shutdown the driver
+  --health          Show driver health status
+  --help            Show this help message
+  --port=<port>     Set the port (can also use RUNIX_DRIVER_PORT env var)
+  
+Environment Variables:
+  RUNIX_DRIVER_PORT                   Driver port
+  RUNIX_DRIVER_HEARTBEAT_ENABLED      Enable heartbeat monitoring (default: true)
+  RUNIX_DRIVER_HEARTBEAT_INTERVAL     Heartbeat interval in ms (default: 30000)
+  RUNIX_DRIVER_AUTO_SHUTDOWN_ENABLED  Enable auto-shutdown (default: true)
+  RUNIX_DRIVER_AUTO_SHUTDOWN_TIMEOUT  Auto-shutdown timeout in ms (default: 300000)
+`);
+          process.exit(0);
+          break;
+      }
+    }
+    
+    // Parse port from command line if provided
+    const portArg = args.find(arg => arg.startsWith('--port='));
+    return portArg ? parseInt(portArg.split('=')[1], 10) : null;
+  }
 }
 
 const logger = createDriverLogger();
@@ -74,13 +389,6 @@ try {
   logger.log('OpenAI library loaded successfully');
 } catch (err) {
   logger.log('OpenAI library not available, using fallback');
-}
-
-// Load environment variables
-try {
-  require('dotenv').config();
-} catch (err) {
-  logger.log('dotenv not available, using system environment');
 }
 
 // Initialize OpenAI client if available
@@ -126,10 +434,35 @@ server.listen(port, '127.0.0.1', () => {
   logger.log(`WebSocket server ready for connections`);
 });
 
+// Initialize heartbeat system
+let heartbeat = null;
+try {
+  // Handle CLI commands first
+  DriverHeartbeat.handleCLICommands('Vision');
+  
+  // Initialize heartbeat system
+  heartbeat = new DriverHeartbeat({
+    driverName: 'Vision',
+    logger: logger,
+    server: server,
+    wss: wss
+  });
+  
+  logger.log('Heartbeat system initialized');
+} catch (error) {
+  logger.error('Failed to initialize heartbeat system:', error);
+}
+
 // Handle incoming messages
 function handleMessage(ws, message) {
   try {
     const request = JSON.parse(message);
+    
+    // Update heartbeat on any engine communication
+    if (heartbeat) {
+      heartbeat.updateHeartbeat();
+    }
+    
     handleRequest(request).then(response => {
       ws.send(JSON.stringify(response));
     }).catch(err => {
@@ -184,16 +517,52 @@ async function handleRequest(request) {
         return handleIntrospect(request.id, request.params?.type || 'steps');
 
       case 'execute':
-        return handleExecute(request.id, request.params?.action, request.params?.args || []);
-
-      case 'health':
+        return handleExecute(request.id, request.params?.action, request.params?.args || []);      case 'health':
         return {
           id: request.id,
           type: 'response',
-          result: { status: 'ok' }
+          result: { 
+            status: 'ok',
+            pid: process.pid,
+            uptime: process.uptime(),
+            memory: process.memoryUsage(),
+            heartbeat: heartbeat ? heartbeat.getStatus() : null,
+            timestamp: new Date().toISOString()
+          }
+        };
+
+      case 'heartbeat':
+        // Explicit heartbeat endpoint
+        if (heartbeat) {
+          heartbeat.updateHeartbeat();
+        }
+        return {
+          id: request.id,
+          type: 'response',
+          result: { 
+            heartbeat: 'updated',
+            timestamp: new Date().toISOString(),
+            ...(heartbeat ? heartbeat.getStatus() : {})
+          }
+        };
+
+      case 'ping':
+        return {
+          id: request.id,
+          type: 'response',
+          result: { 
+            ping: 'pong',
+            timestamp: new Date().toISOString(),
+            driverName: 'Vision'
+          }
         };
 
       case 'shutdown':
+        if (heartbeat) {
+          heartbeat.gracefulShutdown('shutdown-command');
+        } else {
+          process.exit(0);
+        }
         return sendSuccessResponse(request.id, { shutdown: true });
 
       default:
@@ -761,6 +1130,5 @@ process.on('SIGTERM', async () => {
 });
 
 process.on('SIGINT', async () => {
-  logger.log('Received SIGINT, shutting down gracefully');
-  process.exit(0);
+  logger.log('Received SIGINT, shutting down gracefully');  process.exit(0);
 });

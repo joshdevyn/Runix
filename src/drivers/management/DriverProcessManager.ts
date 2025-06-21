@@ -10,6 +10,7 @@ export interface ProcessInfo {
   process: ChildProcess;
   driverId: string;
   startTime: Date;
+  processName?: string; // For tracking executable names
 }
 
 export interface DriverMetadata {
@@ -26,7 +27,10 @@ export interface DriverMetadata {
 export class DriverProcessManager {
   private static instance: DriverProcessManager;
   private processes = new Map<string, ProcessInfo>();
-  private log: Logger;  private portRange = { min: 49152, max: 65535 }; // Ephemeral port range
+  private log: Logger;
+  // Keep track of all Runix-related process names we've spawned
+  private spawnedProcessNames = new Set<string>();
+  private portRange = { min: 49152, max: 65535 }; // Ephemeral port range
   private constructor() {
     const loggerInstance = Logger.getInstance();
     // Safety check for createChildLogger method during cleanup
@@ -92,15 +96,24 @@ export class DriverProcessManager {
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: false,
         shell: process.platform === 'win32' // Use shell on Windows to resolve executables
-      });
-
-      const processInfo: ProcessInfo = {
+      });      const processInfo: ProcessInfo = {
         pid: childProcess.pid!,
         port,
         process: childProcess,
         driverId: metadata.id,
-        startTime: new Date()
+        startTime: new Date(),
+        processName: path.basename(metadata.executable, path.extname(metadata.executable))
       };
+
+      // Track the process name for cleanup purposes
+      const processName = path.basename(metadata.executable, path.extname(metadata.executable));
+      this.spawnedProcessNames.add(processName);
+      this.log.debug('Tracking spawned process name for cleanup', {
+        traceId,
+        driverId: metadata.id,
+        processName,
+        executable: metadata.executable
+      });
 
       // Set up process event handlers
       this.setupProcessHandlers(processInfo, traceId);
@@ -145,15 +158,27 @@ export class DriverProcessManager {
         traceId, 
         driverId, 
         pid: processInfo.pid 
-      });
-
-      // Try graceful shutdown first
+      });      // Try graceful shutdown first
       processInfo.process.kill('SIGTERM');
 
       // Wait for process to exit
       await this.waitForProcessExit(processInfo.process, 5000);
 
+      // Clean up tracking data
       this.processes.delete(driverId);
+      
+      // Remove process name from tracking if no other instances are running
+      if (processInfo.processName) {
+        const stillRunning = Array.from(this.processes.values()).some(p => p.processName === processInfo.processName);
+        if (!stillRunning) {
+          this.spawnedProcessNames.delete(processInfo.processName);
+          this.log.debug('Removed process name from tracking', {
+            traceId,
+            driverId,
+            processName: processInfo.processName
+          });
+        }
+      }
 
       this.log.info('Driver process stopped successfully', {
         traceId,
@@ -206,6 +231,144 @@ export class DriverProcessManager {
       }
     }
   }
+  /**
+   * Emergency cleanup that tries to kill both tracked and untracked Runix driver processes
+   * This method should be used when normal cleanup fails or during crash recovery
+   */
+  async emergencyCleanup(): Promise<void> {
+    const traceId = typeof this.log.startTrace === 'function' ? this.log.startTrace('emergency-cleanup') : 'emergency-cleanup';
+    let killed = 0;
+    
+    try {
+      this.log.warn('Starting emergency cleanup of all Runix driver processes', { traceId });
+      
+      // First, try normal cleanup of tracked processes
+      try {
+        await this.stopAllDrivers();
+        this.log.info('Normal cleanup completed', { traceId });
+      } catch (error) {
+        this.log.error('Normal cleanup failed, proceeding with force cleanup', { traceId }, error);
+      }
+      
+      // Get the list of process names we've spawned
+      const trackedProcessNames = Array.from(this.spawnedProcessNames);
+      this.log.debug('Using tracked process names for cleanup', { 
+        traceId, 
+        trackedProcessNames,
+        totalTracked: trackedProcessNames.length 
+      });
+      
+      // Force cleanup of any remaining driver processes using system commands
+      if (process.platform === 'win32') {
+        // Windows cleanup
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        
+        try {
+          // Kill tracked driver executables
+          for (const processName of trackedProcessNames) {
+            try {
+              await execAsync(`taskkill /F /IM ${processName}.exe 2>nul`);
+              this.log.info(`Force killed tracked driver: ${processName}.exe`, { traceId });
+              killed++;
+            } catch (error) {
+              // Ignore errors - process might not exist
+              this.log.debug(`No processes found for ${processName}.exe`, { traceId });
+            }
+          }
+          
+          // Kill Node.js processes running drivers (for non-compiled drivers)
+          try {
+            const { stdout } = await execAsync(`wmic process where "name='node.exe' and commandline like '%driver%'" get processid /value`);
+            const pids = stdout.match(/ProcessId=(\d+)/g);
+            if (pids) {
+              for (const pidMatch of pids) {
+                const pid = pidMatch.split('=')[1];
+                try {
+                  await execAsync(`taskkill /F /PID ${pid}`);
+                  this.log.info(`Force killed Node.js driver process: PID ${pid}`, { traceId });
+                  killed++;
+                } catch (error) {
+                  // Ignore errors
+                }
+              }
+            }
+          } catch (error) {
+            // Ignore errors
+          }
+        } catch (error) {
+          this.log.error('Windows emergency cleanup failed', { traceId }, error);
+        }
+      } else {
+        // Unix/Linux/macOS cleanup
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        
+        try {
+          // Kill tracked driver executables
+          for (const processName of trackedProcessNames) {
+            try {
+              await execAsync(`pkill -9 ${processName}`);
+              this.log.info(`Force killed tracked driver: ${processName}`, { traceId });
+              killed++;
+            } catch (error) {
+              // Ignore errors - process might not exist
+              this.log.debug(`No processes found for ${processName}`, { traceId });
+            }
+          }
+          
+          // Kill Node.js processes running drivers (for non-compiled drivers)
+          try {
+            await execAsync(`pkill -9 -f "node.*driver"`);
+            this.log.info('Force killed Node.js driver processes', { traceId });
+            killed++;
+          } catch (error) {
+            // Ignore errors
+          }
+        } catch (error) {
+          this.log.error('Unix emergency cleanup failed', { traceId }, error);
+        }
+      }
+      
+      // Clear the internal process map and spawned names
+      this.processes.clear();
+      this.spawnedProcessNames.clear();
+      
+      this.log.info('Emergency cleanup completed', { traceId, processesKilled: killed });
+      
+    } catch (error) {
+      this.log.error('Emergency cleanup encountered errors', { traceId }, error);
+      throw error;
+    } finally {
+      if (typeof this.log.endTrace === 'function') {
+        this.log.endTrace(traceId);
+      }
+    }
+  }
+
+  /**
+   * Get all currently tracked process names
+   * Useful for external cleanup scripts and monitoring
+   */
+  getTrackedProcessNames(): string[] {
+    return Array.from(this.spawnedProcessNames);
+  }
+
+  /**
+   * Get all running process information
+   */
+  getRunningProcesses(): ProcessInfo[] {
+    return Array.from(this.processes.values());
+  }
+
+  /**
+   * Check if a driver is currently running
+   */
+  isDriverRunning(driverId: string): boolean {
+    return this.processes.has(driverId);
+  }
 
   private async findAvailablePort(): Promise<number> {
     for (let i = 0; i < 100; i++) {
@@ -227,13 +390,11 @@ export class DriverProcessManager {
     });
   }
   private setupProcessHandlers(processInfo: ProcessInfo, traceId: string): void {
-    const { process: childProcess, driverId } = processInfo;
-
-    childProcess.stdout?.on('data', (data) => {
+    const { process: childProcess, driverId } = processInfo;    childProcess.stdout?.on('data', (data) => {
       const output = data.toString().trim();
       if (output) {
         // Use info level for stdout to make it visible in tests
-        this.log.info(`Driver stdout [${driverId}]`, { traceId, output });
+        this.log.info(`Driver stdout [${driverId}]: ${output}`, { traceId });
         // Also output directly to console for debugging
         console.log(`[DRIVER-STDOUT] ${driverId}: ${output}`);
       }
@@ -243,7 +404,7 @@ export class DriverProcessManager {
       const output = data.toString().trim();
       if (output) {
         // Use error level for stderr to make it highly visible
-        this.log.error(`Driver stderr [${driverId}]`, { traceId, output });
+        this.log.error(`Driver stderr [${driverId}]: ${output}`, { traceId });
         // Also output directly to console for debugging
         console.error(`[DRIVER-STDERR] ${driverId}: ${output}`);
       }

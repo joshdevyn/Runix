@@ -4,6 +4,9 @@ import { DriverProcessManager } from '../management/DriverProcessManager';
 import { DriverRegistry } from '../driverRegistry';
 import * as net from 'net';
 import { Logger } from '../../utils/logger';
+import { globalShutdownRequested } from '../../index';
+import { ResultLogger, StepResult } from '../../report/resultLogger';
+import { VoiceController, VoiceEvent } from '../../voice/VoiceController';
 
 export interface AgentDriverConfig extends DriverConfig {
   outputDir?: string;
@@ -28,7 +31,9 @@ export interface OrchestrationState {
     plan?: any[];
     actions?: any[];
     results?: any[];
+    actionResult?: any;
     timestamp: number;
+    duration?: number;
   }>;
 }
 
@@ -53,16 +58,42 @@ export class AgentDriver extends BaseDriver {
   private connectionTimeout: number = 5000;
   private requestTimeout: number = 30000; // General request timeout
   private aiDriverInstance: any = null; // Stores the WebSocketDriverInstance from the registry
-    // Agent control state
+  // Agent control state
   private agentState: 'running' | 'paused' | 'stopped';
   private pauseUntil: number = 0; // Timestamp until which agent should remain paused
   private keyboardMonitor: any = null; // For monitoring escape key and user input
-  constructor(config: AgentDriverConfig = {}) {
+  private resultLogger: ResultLogger; // For generating reports
+  private voiceController: VoiceController; // For voice announcements
+    constructor(config: AgentDriverConfig = {}) {
     super();
     this.config = config;
     this.agentState = 'stopped'; // Initialize agent state
     // Initialize logger in constructor
     this.log = Logger.getInstance().createChildLogger({ component: 'AgentDriver' }); 
+    // Initialize result logger for report generation
+    this.resultLogger = new ResultLogger();
+    
+    // Initialize voice controller with explicit config from environment
+    const voiceConfig = {
+      enabled: process.env.RUNIX_VOICE_ENABLED === 'true',
+      speechRate: parseFloat(process.env.RUNIX_VOICE_RATE || '1.0'),
+      speechPitch: parseFloat(process.env.RUNIX_VOICE_PITCH || '1.0'),
+      speechVolume: parseFloat(process.env.RUNIX_VOICE_VOLUME || '1.0'),
+      language: process.env.RUNIX_VOICE_LANGUAGE || 'en-US'
+    };
+      // Debug voice configuration
+    this.log.debug('Voice control configuration', {
+      envVars: {
+        RUNIX_VOICE_ENABLED: process.env.RUNIX_VOICE_ENABLED || 'UNDEFINED',
+        RUNIX_VOICE_RATE: process.env.RUNIX_VOICE_RATE || 'UNDEFINED',
+        RUNIX_VOICE_PITCH: process.env.RUNIX_VOICE_PITCH || 'UNDEFINED',
+        RUNIX_VOICE_VOLUME: process.env.RUNIX_VOICE_VOLUME || 'UNDEFINED',
+        RUNIX_VOICE_LANGUAGE: process.env.RUNIX_VOICE_LANGUAGE || 'UNDEFINED'
+      },
+      parsedConfig: voiceConfig
+    });
+    
+    this.voiceController = new VoiceController(voiceConfig);
   }
   async initialize(config: AgentDriverConfig = {}): Promise<void> {
     this.config = { ...this.config, ...config };
@@ -375,8 +406,7 @@ export class AgentDriver extends BaseDriver {
 
   /**
    * Main orchestration method - coordinates all drivers to complete a task
-   */
-  async orchestrate(goal: string, options: { maxIterations?: number; iterationDelay?: number } = {}): Promise<OrchestrationState> {
+   */  async orchestrate(goal: string, options: { maxIterations?: number; iterationDelay?: number } = {}): Promise<OrchestrationState> {
     const state: OrchestrationState = {
       goal,
       currentIteration: 0,
@@ -386,6 +416,9 @@ export class AgentDriver extends BaseDriver {
     };
 
     this.log.info('Starting orchestration', { goal, maxIterations: state.maxIterations });
+    
+    // Voice announcement: goal set
+    await this.announceGoal(goal);
 
     try {
       while (!state.isComplete && state.currentIteration < state.maxIterations) {
@@ -398,30 +431,53 @@ export class AgentDriver extends BaseDriver {
           timestamp: iterationStart
         };
 
-        try {
+        try {          
           // Step 1: Take screenshot
+          await this.announceThinking('I need to see the current state of the screen. Taking a screenshot for analysis');
           const screenshotResult = await this.coordinateScreenshot();
           iterationData.screenshot = screenshotResult;
 
           // Step 2: Analyze screen
+          await this.announceThinking('Now I will analyze what I can see on the screen to understand the current situation');
           const analysisResult = await this.coordinateScreenAnalysis(screenshotResult);
           iterationData.analysis = analysisResult;
 
           // Step 3: Make decisions and plan actions
+          await this.announceThinking('Based on what I can see, I will plan the next actions to achieve the goal');
           const planResult = await this.coordinateDecisionMaking(goal, analysisResult, state.history);
-          iterationData.plan = planResult;
-
-          // Check if goal is achieved
+          iterationData.plan = planResult;          // Check if goal is achieved
           if (planResult.goalAchieved) {
             state.isComplete = true;
             this.log.info('Goal achieved!', { iteration: state.currentIteration });
+            await this.voiceController.speak(`Excellent! I have successfully achieved the goal: ${goal}. The task is now complete.`);
             break;
           }
 
-          // Step 4: Execute actions
-          const executionResults = await this.coordinateActionExecution(planResult.actions);
-          iterationData.actions = planResult.actions;
-          iterationData.results = executionResults;
+          // Step 4: Execute actions if provided and goal not achieved
+          if (planResult.actions && planResult.actions.length > 0) {
+            const executionResults = await this.coordinateActionExecution(planResult.actions);
+            iterationData.actions = planResult.actions;
+            iterationData.results = executionResults;
+
+            // Check if any action indicates task completion
+            const hasTaskCompletion = executionResults.some(result => 
+              result.action?.type === 'task_complete' || 
+              result.result?.isComplete === true ||
+              (result.success && result.action?.originalAction?.type === 'task_complete')
+            );            if (hasTaskCompletion) {
+              state.isComplete = true;
+              this.log.info('Task completed by action execution!', { iteration: state.currentIteration });
+              await this.voiceController.speak(`Perfect! The task has been completed successfully. All required actions have been executed and the goal has been achieved.`);
+              break;
+            }          } else {
+            // No actions to execute - check if AI thinks task is complete
+            if (planResult.isComplete || planResult.taskComplete || planResult.completed) {
+              state.isComplete = true;
+              this.log.info('AI indicated task is complete without further actions!', { iteration: state.currentIteration });
+              await this.voiceController.speak(`Great! I have determined that the task is already complete. No further actions are needed to achieve the goal.`);
+              break;
+            }
+          }
 
           // Step 5: Wait before next iteration if configured
           if (options.iterationDelay || this.config.iterationDelay) {
@@ -432,6 +488,7 @@ export class AgentDriver extends BaseDriver {
         } catch (iterationError) {
           this.log.error(`Error in iteration ${state.currentIteration}`, { error: iterationError });
           iterationData.error = iterationError instanceof Error ? iterationError.message : String(iterationError);
+          await this.announceError(`iteration ${state.currentIteration} failed`);
         }
 
         state.history.push(iterationData);
@@ -440,18 +497,24 @@ export class AgentDriver extends BaseDriver {
       if (!state.isComplete) {
         state.error = `Task not completed within ${state.maxIterations} iterations`;
         this.log.warn('Orchestration incomplete', { maxIterations: state.maxIterations });
+        await this.announceError('task not completed within maximum iterations');
       }
 
     } catch (error) {
       state.error = error instanceof Error ? error.message : String(error);
       this.log.error('Orchestration failed', { error: state.error });
-    }
-
-    this.log.info('Orchestration completed', { 
+      await this.announceError('orchestration failed');
+    }    this.log.info('Orchestration completed', { 
       success: state.isComplete, 
       iterations: state.currentIteration,
       error: state.error 
     });
+
+    // Add final thank you message for completed agent runs
+    if (this.voiceController.isEnabled()) {
+      await this.voiceController.speak("Thank you for using Runix!");
+      this.log.debug('Final thank you message announced');
+    }
 
     return state;
   }
@@ -548,11 +611,9 @@ export class AgentDriver extends BaseDriver {
       goalAchieved: goalCheckResult?.success && goalCheckResult?.data?.achieved
     };
   }
-
   /**
    * Coordinate action execution via system-driver
-   */
-  private async coordinateActionExecution(actions: any[]): Promise<any[]> {
+   */  private async coordinateActionExecution(actions: any[]): Promise<any[]> {
     this.log.debug('Executing actions via system-driver', { actionCount: actions?.length || 0 });
     
     if (!actions || actions.length === 0) {
@@ -568,24 +629,67 @@ export class AgentDriver extends BaseDriver {
 
     const results = [];
     
-    for (const action of actions) {
+    for (let i = 0; i < actions.length; i++) {
+      const action = actions[i];
+      const nextAction = i < actions.length - 1 ? actions[i + 1] : null;
+      
       try {
-        this.log.debug('Executing action', { action: action.type || action.action });
+        const actionType = action.type || action.action;
+        this.log.debug('Executing action', { action: actionType });
+        
+        // Voice announcement: action start
+        await this.announceActionStart(actionType, action);
         
         const result = await systemDriver.callMethod('execute', { 
-          action: action.type || action.action, 
+          action: actionType, 
           args: action.args || [action] 
         });
         
-        results.push({
+        const actionResult = {
           action,
           success: result?.success || false,
           result: result?.data,
           error: result?.error
-        });
+        };
+        
+        results.push(actionResult);
 
-        // Small delay between actions for stability
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Voice announcement: action complete
+        await this.announceActionComplete(actionType, actionResult);
+
+        // Determine delay based on current and next action
+        let delayMs = 100; // Default delay
+        
+        const currentActionType = actionType;
+        const nextActionType = nextAction?.type || nextAction?.action;
+        
+        // Longer delay after Windows key press, especially if followed by typing
+        if (currentActionType === 'pressKey') {
+          const key = action.args?.[0] || action.key;
+          if (key === 'Win' || key === 'Windows' || key === 'Meta') {
+            if (nextActionType === 'typeText' || nextActionType === 'type') {
+              delayMs = 1200; // Extra long delay when Win key is followed by typing
+              this.log.debug('Using extended delay after Windows key before typing', { delayMs });
+            } else {
+              delayMs = 800; // Longer delay for other actions after Windows key
+              this.log.debug('Using longer delay after Windows key', { delayMs });
+            }
+          }
+        }
+        
+        // Special delay for Ctrl+Esc combinations
+        if (currentActionType === 'pressKey') {
+          const modifiers = action.args?.[1] || action.modifiers || [];
+          if (modifiers.includes('Ctrl') && (action.args?.[0] === 'Escape' || action.key === 'Escape')) {
+            delayMs = 600; // Delay for Ctrl+Esc
+            this.log.debug('Using delay after Ctrl+Esc', { delayMs });
+          }
+        }
+
+        // Apply the delay between actions
+        if (i < actions.length - 1) { // Don't delay after the last action
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
         
       } catch (error) {
         this.log.error('Action execution failed', { action, error });
@@ -598,8 +702,7 @@ export class AgentDriver extends BaseDriver {
     }
 
     return results;
-  }
-  async shutdown(): Promise<void> {
+  }  async shutdown(): Promise<void> {
     this.log.info('Agent Driver shutting down');
     
     // Stop agent if running
@@ -607,6 +710,9 @@ export class AgentDriver extends BaseDriver {
     
     // Clean up keyboard monitoring
     await this.cleanupKeyboardMonitoring();
+    
+    // Shutdown voice controller
+    this.voiceController.shutdown();
     
     if (this.aiDriverInstance && typeof this.aiDriverInstance.stop === 'function') {
       try {
@@ -764,7 +870,7 @@ export class AgentDriver extends BaseDriver {
     const state: OrchestrationState = {
       goal: task,
       currentIteration: 0,
-      maxIterations: options.maxIterations || this.config.maxIterations || 20,
+      maxIterations: options.maxIterations || this.config.maxIterations || 5,
       isComplete: false,
       history: []
     };
@@ -796,7 +902,13 @@ export class AgentDriver extends BaseDriver {
       let screenshotBase64 = await this.convertScreenshotToBase64(currentScreenshot);
         // Start the continuous loop with safety controls
       while (!state.isComplete && state.currentIteration < state.maxIterations && (this.agentState as string) !== 'stopped') {
-        
+          // Check for global shutdown (Ctrl+C)
+        if (globalShutdownRequested) {
+          this.stopAgent();
+          state.error = 'Agent stopped by user (Ctrl+C)';
+          break;
+        }
+
         // Check for user escape key
         if (await this.checkForEscapeKey()) {
           this.stopAgent();
@@ -822,13 +934,44 @@ export class AgentDriver extends BaseDriver {
           agentState: this.agentState
         };
 
-        try {
-          // Step 1: Get AI decision based on current screenshot and task
+        try {          // Step 1: Get AI decision based on current screenshot and task
+          this.log.info('🤖 Requesting AI decision...', {
+            iteration: state.currentIteration,
+            environment: options.environment || 'desktop',
+            historyLength: state.history.length
+          });
+          
           const aiDecision = await this.getAIDecision(task, screenshotBase64, state.history, {
             environment: options.environment || 'desktop',
             displayWidth: options.displayWidth || 1920,
             displayHeight: options.displayHeight || 1080
           });
+          
+          this.log.info('🧠 AI decision received', {
+            iteration: state.currentIteration,
+            hasReasoning: !!aiDecision.reasoning,
+            isComplete: aiDecision.isComplete,
+            actionType: aiDecision.action?.type || 'none',
+            actionsCount: aiDecision.actions?.length || 0,
+            reasoning: aiDecision.reasoning ? aiDecision.reasoning.substring(0, 200) + '...' : 'No reasoning provided'
+          });
+          
+          // Announce AI reasoning via voice (if available)
+          if (aiDecision.reasoning) {
+            this.log.debug('🗣️ Announcing AI reasoning via voice', {
+              reasoningLength: aiDecision.reasoning.length,
+              voiceEnabled: this.voiceController.isEnabled()
+            });
+            
+            try {
+              await this.voiceController.speak(aiDecision.reasoning);
+              this.log.debug('✅ Voice announcement completed successfully');
+            } catch (voiceError) {
+              this.log.warn('⚠️ Voice announcement failed', { error: voiceError });
+            }
+          } else {
+            this.log.debug('📝 No AI reasoning to announce');
+          }
           
           iterationData.aiDecision = aiDecision;          // Step 2: Check if task is complete
           if (aiDecision.isComplete || aiDecision.action?.type === 'task_complete') {
@@ -836,10 +979,11 @@ export class AgentDriver extends BaseDriver {
             this.log.info('✅ Task completed by AI decision!', { iteration: state.currentIteration });
             console.log(`\n✅ TASK COMPLETED! (Iteration ${state.currentIteration})\n`);
             break;
-          }// Step 3: Execute the AI-suggested action (if agent is still running)
-          if (aiDecision.action && (this.agentState as string) === 'running') {
-            this.log.info('About to execute AI action - checking for user interruption first...', { 
-              actionType: aiDecision.action.type 
+          }          // Step 3: Execute the AI-suggested action(s) (if agent is still running)
+          if ((aiDecision.action || aiDecision.actions) && (this.agentState as string) === 'running') {
+            this.log.info('About to execute AI action(s) - checking for user interruption first...', { 
+              actionType: aiDecision.action?.type || 'sequence',
+              sequenceLength: aiDecision.actions?.length || 1
             });
               // Double-check for user input before executing potentially disruptive actions
             await this.checkForUserInput();
@@ -850,22 +994,47 @@ export class AgentDriver extends BaseDriver {
               continue;
             }
 
-            const actionResult = await this.executeAIAction(aiDecision.action);
-            iterationData.actionResult = actionResult;
+            let actionResult;
             
-            // Wait for action to take effect
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Handle action sequences
+            if (aiDecision.actions && Array.isArray(aiDecision.actions)) {
+              this.log.info(`Executing action sequence of ${aiDecision.actions.length} actions`);
+              const results = [];
+              
+              for (let i = 0; i < aiDecision.actions.length; i++) {
+                const action = aiDecision.actions[i];
+                this.log.debug(`Executing action ${i + 1}/${aiDecision.actions.length}`, { actionType: action.type });
+                
+                const singleResult = await this.executeAIAction(action);                results.push(singleResult);
+                  // Human-like delay between actions in sequence (configurable via env)
+                if (i < aiDecision.actions.length - 1) {
+                  const sequenceDelay = parseInt(process.env.RUNIX_AGENT_SEQUENCE_DELAY || '2000');
+                  await new Promise(resolve => setTimeout(resolve, sequenceDelay));
+                }
+              }
+              
+              actionResult = {
+                success: true,
+                sequenceResults: results,
+                action: 'sequence'
+              };
+            } else if (aiDecision.action) {
+              // Handle single action
+              actionResult = await this.executeAIAction(aiDecision.action);
+            }
+            
+            iterationData.actionResult = actionResult;            
+            // Wait for action to take effect (configurable via env)
+            const postActionDelay = parseInt(process.env.RUNIX_AGENT_POST_ACTION_DELAY || '3000');
+            await new Promise(resolve => setTimeout(resolve, postActionDelay));
             
             // Step 4: Take new screenshot after action
             currentScreenshot = await this.coordinateScreenshot();
-            screenshotBase64 = await this.convertScreenshotToBase64(currentScreenshot);
-          } else if (!aiDecision.action) {
-            this.log.warn('No action suggested by AI', { iteration: state.currentIteration });
-          }
-
-          // Step 5: Wait before next iteration if configured
+            screenshotBase64 = await this.convertScreenshotToBase64(currentScreenshot);} else if (!aiDecision.action && !aiDecision.actions) {
+            this.log.warn('No action or actions suggested by AI', { iteration: state.currentIteration });
+          }          // Step 5: Wait before next iteration if configured
           if (options.iterationDelay || this.config.iterationDelay) {
-            const delay = options.iterationDelay || this.config.iterationDelay || 2000;
+            const delay = options.iterationDelay || this.config.iterationDelay || parseInt(process.env.RUNIX_AGENT_ACTION_DELAY || '2000');
             await new Promise(resolve => setTimeout(resolve, delay));
           }
 
@@ -876,14 +1045,31 @@ export class AgentDriver extends BaseDriver {
           // Take screenshot even if there was an error, for debugging
           try {
             currentScreenshot = await this.coordinateScreenshot();
-            screenshotBase64 = await this.convertScreenshotToBase64(currentScreenshot);
-          } catch (screenshotError) {
+            screenshotBase64 = await this.convertScreenshotToBase64(currentScreenshot);          } catch (screenshotError) {
             this.log.error('Failed to take error recovery screenshot', { error: screenshotError });
           }
         }
 
         state.history.push(iterationData);
-      }      // Set completion status and error messages
+        
+        // Log this iteration as a step result for report generation
+        const stepResult: StepResult = {
+          success: !iterationData.error && (iterationData.actionResult?.success !== false),
+          step: `Agent Iteration ${state.currentIteration}: ${task}`,
+          data: {
+            iteration: state.currentIteration,
+            analysis: iterationData.analysis,
+            plan: iterationData.plan,
+            actions: iterationData.actions,
+            actionResult: iterationData.actionResult,
+            screenshot: iterationData.screenshot
+          },
+          error: iterationData.error ? new Error(iterationData.error) : undefined,
+          timestamp: new Date(iterationData.timestamp),
+          duration: iterationData.duration
+        };
+        this.resultLogger.addResult(stepResult);
+      }// Set completion status and error messages
       if ((this.agentState as string) === 'stopped') {
         state.error = 'Agent stopped by user request';
         this.log.info('Agent loop stopped by user');
@@ -903,9 +1089,7 @@ export class AgentDriver extends BaseDriver {
       iterations: state.currentIteration,
       finalState: this.agentState,
       error: state.error 
-    });
-
-    // Final status display
+    });    // Final status display
     console.log('\n' + '='.repeat(50));
     console.log('🏁 AGENT EXECUTION COMPLETE');
     console.log(`✅ Success: ${state.isComplete ? 'YES' : 'NO'}`);
@@ -914,7 +1098,32 @@ export class AgentDriver extends BaseDriver {
     if (state.error) {
       console.log(`❌ Error: ${state.error}`);
     }
-    console.log('='.repeat(50) + '\n');
+    console.log('='.repeat(50) + '\n');    // Generate reports for AI agent execution
+    try {
+      this.log.info('Generating agent execution reports');
+      
+      // Ensure reports directory exists
+      const fs = await import('fs/promises');
+      const reportsDir = 'reports';
+      await fs.mkdir(reportsDir, { recursive: true });
+      
+      // Generate reports in the reports directory
+      const reportPath = `${reportsDir}/runix-report.json`;
+      this.resultLogger.writeReport(reportPath);
+      console.log('📄 Agent execution reports generated in reports/ directory');
+    } catch (reportError) {
+      this.log.error('Failed to generate agent execution reports', { error: reportError });
+      console.log('⚠️  Warning: Failed to generate execution reports');
+    }
+
+    // Generate .feature file for replay capability
+    try {
+      await this.generateFeatureFile(task, state);
+      console.log('📝 Replay feature file generated: ai-recorded-workflow.feature');
+    } catch (featureError) {
+      this.log.error('Failed to generate feature file', { error: featureError });
+      console.log('⚠️  Warning: Failed to generate replay feature file');
+    }
 
     return state;
   }
@@ -957,76 +1166,166 @@ export class AgentDriver extends BaseDriver {
 
     return result.data || result;
   }
-
   /**
    * Execute an AI-suggested action using the appropriate driver
-   */
-  private async executeAIAction(action: any): Promise<any> {
+   */  private async executeAIAction(action: any): Promise<any> {
     this.log.debug('Executing AI-suggested action', { actionType: action.type });
+
+    // Voice announcement: action start
+    await this.announceActionStart(action.type, action);
 
     const registry = DriverRegistry.getInstance();
     
     try {
-      switch (action.type) {
-        case 'click':
+      switch (action.type) {        case 'click':
           const systemDriver = await registry.startDriver('system-driver');
-          return await systemDriver.callMethod('execute', {
+          const clickResult = await systemDriver.callMethod('execute', {
             action: 'clickAt',
             args: [action.x, action.y]
           });
-
-        case 'double_click':
+          // Add action context for feature file generation
+          const clickActionResult = {
+            ...clickResult,
+            driver: 'system-driver',
+            action: 'clickAt',
+            args: [action.x, action.y],
+            originalAction: action
+          };
+          
+          // Voice announcement: action completion
+          await this.announceActionComplete(action.type, clickActionResult);
+          return clickActionResult;        case 'double_click':
           const systemDriver2 = await registry.startDriver('system-driver');
-          return await systemDriver2.callMethod('execute', {
+          const doubleClickResult = await systemDriver2.callMethod('execute', {
             action: 'doubleClickAt',
             args: [action.x, action.y]
           });
-
-        case 'type':
+          const doubleClickActionResult = {
+            ...doubleClickResult,
+            driver: 'system-driver',
+            action: 'doubleClickAt',
+            args: [action.x, action.y],
+            originalAction: action
+          };
+          
+          // Voice announcement: action completion
+          await this.announceActionComplete(action.type, doubleClickActionResult);
+          return doubleClickActionResult;        case 'type':
           const systemDriver3 = await registry.startDriver('system-driver');
-          return await systemDriver3.callMethod('execute', {
+          const typeResult = await systemDriver3.callMethod('execute', {
             action: 'typeText',
             args: [action.text]
           });
-
-        case 'key':
+          const typeActionResult = {
+            ...typeResult,
+            driver: 'system-driver',
+            action: 'typeText',
+            args: [action.text],
+            originalAction: action
+          };
+          
+          // Voice announcement: action completion
+          await this.announceActionComplete(action.type, typeActionResult);
+          return typeActionResult;case 'key':
         case 'keypress':
           const systemDriver4 = await registry.startDriver('system-driver');
-          return await systemDriver4.callMethod('execute', {
+          const keyResult = await systemDriver4.callMethod('execute', {
             action: 'pressKey',
             args: [action.key || action.keys?.[0]]
           });
-
-        case 'scroll':
+          const keyActionResult = {
+            ...keyResult,
+            driver: 'system-driver',
+            action: 'pressKey',
+            args: [action.key || action.keys?.[0]],
+            originalAction: action
+          };
+          
+          // Voice announcement: action completion
+          await this.announceActionComplete(action.type, keyActionResult);
+          return keyActionResult;        case 'scroll':
           const systemDriver5 = await registry.startDriver('system-driver');
-          return await systemDriver5.callMethod('execute', {
+          const scrollResult = await systemDriver5.callMethod('execute', {
             action: 'scroll',
             args: [action.x, action.y, action.scrollX || 0, action.scrollY || action.scroll_y || -3]
           });
-
-        case 'wait':
+          const scrollActionResult = {
+            ...scrollResult,
+            driver: 'system-driver',
+            action: 'scroll',
+            args: [action.x, action.y, action.scrollX || 0, action.scrollY || action.scroll_y || -3],
+            originalAction: action
+          };
+          
+          // Voice announcement: action completion
+          await this.announceActionComplete(action.type, scrollActionResult);
+          return scrollActionResult;        case 'wait':
           this.log.debug('Waiting as requested by AI', { duration: action.duration || 2000 });
           await new Promise(resolve => setTimeout(resolve, action.duration || 2000));
-          return { success: true, action: 'wait' };
-
-        case 'screenshot':
+          const waitResult = { 
+            success: true, 
+            action: 'wait',
+            driver: 'built-in',
+            args: [action.duration || 2000],
+            originalAction: action
+          };
+          
+          // Voice announcement: action completion
+          await this.announceActionComplete(action.type, waitResult);
+          return waitResult;        case 'screenshot':
           // Screenshot will be taken automatically in the main loop
-          return { success: true, action: 'screenshot' };
-
-        case 'task_complete':
+          const screenshotResult = { 
+            success: true, 
+            action: 'screenshot',
+            driver: 'built-in',
+            args: [],
+            originalAction: action
+          };
+          
+          // Voice announcement: action completion
+          await this.announceActionComplete(action.type, screenshotResult);
+          return screenshotResult;case 'task_complete':
           this.log.info('AI indicated task is complete');
-          return { success: true, action: 'task_complete', isComplete: true };
-
-        default:
+          const completeResult = { 
+            success: true, 
+            action: 'task_complete', 
+            isComplete: true,
+            driver: 'built-in',
+            args: [],
+            originalAction: action
+          };
+          
+          // Voice announcement: action completion
+          await this.announceActionComplete(action.type, completeResult);
+          return completeResult;default:
           this.log.warn('Unknown action type from AI', { actionType: action.type });
-          return { success: false, error: `Unknown action type: ${action.type}` };
+          const unknownResult = { 
+            success: false, 
+            error: `Unknown action type: ${action.type}`,
+            driver: 'unknown',
+            action: action.type,
+            args: [],
+            originalAction: action
+          };
+          
+          // Voice announcement: action completion (error case)
+          await this.announceActionComplete(action.type, unknownResult);
+          return unknownResult;
       }
     } catch (error) {
       this.log.error('Failed to execute AI action', { action, error });
-      return { 
+      const errorResult = { 
         success: false, 
-        error: error instanceof Error ? error.message : String(error) 
+        error: error instanceof Error ? error.message : String(error),
+        driver: 'system-driver',
+        action: action.type,
+        args: [],
+        originalAction: action
       };
+      
+      // Voice announcement: action completion (error case)
+      await this.announceActionComplete(action.type, errorResult);
+      return errorResult;
     }
   }
 
@@ -1060,12 +1359,681 @@ export class AgentDriver extends BaseDriver {
       } else if (type === 'resume') {
         console.log(`\n▶️  ${formattedMessage}\n`);
       }
-      
-      // Could potentially add system notifications or beeps here
+        // Could potentially add system notifications or beeps here
       // For Windows: this.playSystemSound(type);
       
     } catch (error) {
       this.log.debug('Error providing user feedback', { error });
     }
+  }
+
+  /**
+   * Generate a .feature file from the agent execution for replay capability
+   */
+  private async generateFeatureFile(task: string, state: OrchestrationState): Promise<void> {
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      
+      // Create templates directory if it doesn't exist
+      const templatesDir = 'templates';
+      await fs.mkdir(templatesDir, { recursive: true });
+      
+      // Generate sanitized filename from task
+      const sanitizedTask = task.replace(/[^a-z0-9]/gi, '-').toLowerCase();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const filename = `ai-recorded-${sanitizedTask}-${timestamp}.feature`;
+      const filePath = path.join(templatesDir, filename);
+      
+      // Generate feature content
+      const featureContent = this.generateFeatureContent(task, state);
+      
+      // Write the feature file
+      await fs.writeFile(filePath, featureContent, 'utf8');
+      
+      // Also create a generic "latest" version for easy access
+      const latestPath = path.join(templatesDir, 'ai-recorded-workflow.feature');
+      await fs.writeFile(latestPath, featureContent, 'utf8');
+      
+      this.log.info('Generated replay feature file', { 
+        filePath, 
+        latestPath, 
+        task, 
+        iterations: state.currentIteration 
+      });
+      
+    } catch (error) {
+      this.log.error('Failed to generate feature file', { error, task });
+      throw error;
+    }
+  }
+
+  /**
+   * Generate Gherkin feature content from agent execution history
+   */
+  private generateFeatureContent(task: string, state: OrchestrationState): string {
+    const timestamp = new Date().toISOString();
+    
+    let featureContent = `# Auto-generated by Runix AI Agent
+# Task: ${task}
+# Generated: ${timestamp}
+# Success: ${state.isComplete ? 'YES' : 'NO'}
+# Iterations: ${state.currentIteration}/${state.maxIterations}
+
+Feature: AI Agent Recorded Workflow - ${task}
+  As an automation engineer
+  I want to replay the AI agent's recorded actions
+  So that I can reproduce the same workflow consistently
+
+  @ai-recorded @replay
+  Scenario: Replay AI Agent Task - ${task}
+    # Original AI task: ${task}
+    # Execution completed: ${state.isComplete ? 'Successfully' : 'Incomplete'}
+    
+`;
+
+    // Add steps based on the agent's actions
+    let stepNumber = 1;
+    
+    for (const iteration of state.history) {
+      featureContent += `    # === Iteration ${iteration.iteration} ===\n`;
+      
+      // Add screenshot step if available
+      if (iteration.screenshot) {
+        featureContent += `    When I take a screenshot "iteration-${iteration.iteration}-start.png"\n`;
+      }
+      
+      // Convert AI actions to Gherkin steps
+      if (iteration.actionResult?.sequenceResults) {
+        // Handle action sequences
+        for (const actionResult of iteration.actionResult.sequenceResults) {
+          const step = this.convertActionToGherkinStep(actionResult.data, stepNumber++);
+          if (step) {
+            featureContent += `    ${step}\n`;
+          }
+        }
+      } else if (iteration.actionResult) {
+        // Handle single actions
+        const step = this.convertActionToGherkinStep(iteration.actionResult, stepNumber++);
+        if (step) {
+          featureContent += `    ${step}\n`;
+        }
+      }
+      
+      featureContent += `    And I wait for 2 seconds  # Post-action delay\n`;
+      
+      if (iteration.screenshot) {
+        featureContent += `    And I take a screenshot "iteration-${iteration.iteration}-end.png"\n`;
+      }
+      
+      featureContent += '\n';
+    }
+    
+    // Add verification steps
+    featureContent += `    # === Verification ===\n`;
+    featureContent += `    Then the workflow should be completed\n`;
+    
+    if (state.isComplete) {
+      featureContent += `    And the task "${task}" should be successful\n`;
+    } else {
+      featureContent += `    # Note: Original AI task was not completed within ${state.maxIterations} iterations\n`;
+      featureContent += `    # Manual verification may be required\n`;
+    }
+    
+    return featureContent;
+  }  /**
+   * Convert an AI action result to a Gherkin step
+   */
+  private convertActionToGherkinStep(actionData: any, stepNumber: number): string | null {
+    if (!actionData) return null;
+    
+    try {
+      // Handle system-driver actions
+      if (actionData.driver === 'system-driver' || actionData.action) {
+        const action = actionData.action || actionData.type;
+        const args = actionData.args || actionData.arguments || [];
+
+        switch (action) {
+          // File operations
+          case 'createFile':
+            return `And I create file "${args[0]}" with content "${args[1] || ''}"`;
+          
+          case 'readFile':
+            return `And I read file "${args[0]}"`;
+          
+          case 'writeFile':
+            return `And I write to file "${args[0]}" with content "${args[1]}"`;
+          
+          case 'deleteFile':
+            return `And I delete file "${args[0]}"`;
+
+          // Command and process operations
+          case 'executeCommand':
+            return `And I execute command "${args[0]}"`;
+          
+          case 'startProcess':
+            const processArgs = args[1] ? ` with arguments "${args[1].join(' ')}"` : '';
+            return `And I start process "${args[0]}"${processArgs}`;
+          
+          case 'killProcess':
+            const signal = args[1] ? ` with signal "${args[1]}"` : '';
+            return `And I kill process "${args[0]}"${signal}`;
+          
+          case 'listProcesses':
+            return `And I list all processes`;
+
+          // UI automation actions
+          case 'takeScreenshot':
+            const filename = args[0] || `step-${stepNumber}.png`;
+            return `And I take a screenshot "${filename}"`;
+          
+          case 'clickAt':
+            return `And I click at coordinates (${args[0]}, ${args[1]})`;
+          
+          case 'doubleClickAt':
+            return `And I double-click at coordinates (${args[0]}, ${args[1]})`;
+          
+          case 'rightClickAt':
+            return `And I right-click at coordinates (${args[0]}, ${args[1]})`;
+          
+          case 'typeText':
+            return `And I type text "${args[0]}"`;
+          
+          case 'pressKey':
+            if (args[1] && Array.isArray(args[1]) && args[1].length > 0) {
+              return `And I press key combination "${args[1].join('+')}+${args[0]}"`;
+            }
+            return `And I press key "${args[0]}"`;
+          
+          case 'moveMouse':
+            return `And I move mouse to coordinates (${args[0]}, ${args[1]})`;
+          
+          case 'drag':
+            return `And I drag from coordinates (${args[0]}, ${args[1]}) to (${args[2]}, ${args[3]})`;
+          
+          case 'scroll':
+            return `And I scroll at coordinates (${args[0]}, ${args[1]}) by (${args[2] || 0}, ${args[3] || 0})`;
+          
+          case 'getMousePosition':
+            return `And I get mouse position`;
+          
+          case 'getScreenSize':
+            return `And I get screen size`;
+          
+          case 'captureRegion':
+            return `And I capture screen region from (${args[0]}, ${args[1]}) to (${args[2]}, ${args[3]})`;
+          
+          case 'findColorAt':
+            return `And I find color at coordinates (${args[0]}, ${args[1]})`;
+          
+          case 'waitForColor':
+            return `And I wait for color "${args[0]}" at coordinates (${args[1]}, ${args[2]})`;
+
+          // Verification actions
+          case 'verifyFileContent':
+            return `And I verify file "${args[0]}" contains "${args[1]}"`;
+          
+          case 'verifyFileExistsContains':
+            return `And I verify file "${args[0]}" exists and contains "${args[1]}"`;
+          
+          case 'verifyCommandOutput':
+            return `And I verify command "${args[0]}" output contains "${args[1]}"`;
+          
+          case 'verifyProcessStarted':
+            return `And I verify process "${args[0]}" is started`;
+          
+          case 'verifyProcessManageable':
+            return `And I verify process "${args[0]}" is manageable`;
+          
+          case 'attemptRestrictedAccess':
+            return `And I attempt restricted access to "${args[0]}"`;
+          
+          case 'verifySecurityRestrictions':
+            return `And I verify security restrictions for "${args[0]}"`;
+
+          // Batch operations
+          case 'createMultipleFiles':
+            return `And I create multiple files: ${JSON.stringify(args[0])}`;
+          
+          case 'readAllFiles':
+            return `And I read all files: ${JSON.stringify(args[0])}`;
+          
+          case 'verifyEachFileContent':
+            return `And I verify each file content: ${JSON.stringify(args[0])}`;
+          
+          case 'cleanUpFiles':
+            return `And I clean up files: ${JSON.stringify(args[0])}`;
+
+          // Key checking
+          case 'checkKeyPressed':
+            return `And I check if key "${args[0]}" is pressed`;
+          
+          case 'checkAnyKeyPressed':
+            return `And I check if any key is pressed`;
+
+          // Generic introspection
+          case 'introspect':
+            return `And I introspect system driver capabilities`;
+
+          default:
+            // Handle legacy action formats from vision-driver or ai-driver
+            return this.handleLegacyActionFormats(actionData, stepNumber);
+        }
+      }
+
+      // Handle built-in actions
+      if (actionData.driver === 'built-in') {
+        switch (actionData.action) {
+          case 'wait':
+            return `And I wait for ${actionData.args[0]} milliseconds`;
+          
+          case 'screenshot':
+            return `And I take a screenshot "step-${stepNumber}.png"`;
+          
+          case 'task_complete':
+            return `And I complete the task`;
+          
+          default:
+            return `# Built-in action: ${actionData.action}`;
+        }
+      }
+
+      // Handle legacy action formats from vision-driver or ai-driver
+      return this.handleLegacyActionFormats(actionData, stepNumber);
+
+    } catch (error) {
+      this.log.debug('Error converting action to Gherkin step', { error, actionData });
+      return `# Error converting action: ${JSON.stringify(actionData)}`;
+    }
+  }
+
+  /**
+   * Handle legacy action formats from vision-driver or ai-driver
+   */
+  private handleLegacyActionFormats(actionData: any, stepNumber: number): string | null {
+    try {
+      switch (actionData.action || actionData.type) {
+        case 'typed':
+          return `And I type text "${actionData.text}"`;
+        
+        case 'key-pressed':
+          if (actionData.modifiers && actionData.modifiers.length > 0) {
+            return `And I press key combination "${actionData.modifiers.join('+')}+${actionData.key}"`;
+          }
+          return `And I press key "${actionData.key}"`;
+        
+        case 'clicked':
+          return `And I click at coordinates (${actionData.x}, ${actionData.y})`;
+        
+        case 'double-clicked':
+          return `And I double-click at coordinates (${actionData.x}, ${actionData.y})`;
+        
+        case 'scrolled':
+          return `And I scroll at coordinates (${actionData.x}, ${actionData.y}) by (${actionData.scrollX || 0}, ${actionData.scrollY || 0})`;
+        
+        case 'screenshot':
+          return `And I take a screenshot "step-${stepNumber}.png"`;
+        
+        default:
+          // Generic fallback for unknown actions
+          if (actionData.text) {
+            return `And I type text "${actionData.text}"`;
+          } else if (actionData.key) {
+            return `And I press key "${actionData.key}"`;
+          } else if (actionData.x !== undefined && actionData.y !== undefined) {
+            return `And I click at coordinates (${actionData.x}, ${actionData.y})`;
+          }
+          return `# Unknown action: ${JSON.stringify(actionData)}`;
+      }
+    } catch (error) {
+      this.log.debug('Error handling legacy action format', { error, actionData });
+      return `# Error handling legacy action: ${JSON.stringify(actionData)}`;
+    }
+  }  /**
+   * Voice announcement for action start
+   * NASA Rule: Single responsibility - focused voice announcements
+   */  /**
+   * Voice announcement for action start
+   * NASA Rule: Single responsibility - focused voice announcements
+   */
+  private async announceActionStart(actionType: string, action: any): Promise<void> {
+    this.log.debug('announceActionStart called', { 
+      actionType, 
+      voiceEnabled: this.voiceController.isEnabled() 
+    });
+    
+    if (!this.voiceController.isEnabled()) {
+      this.log.debug('Voice controller disabled, skipping announcement');
+      return;
+    }
+
+    // Simple, direct voice messages - easier to debug and modify
+    const actionDescription = this.getActionDescription(actionType, action);
+    const message = `${actionDescription}`;
+    
+    const event: VoiceEvent = {
+      type: 'action_start',
+      message,
+      data: { actionType, action }
+    };
+
+    this.log.debug('Announcing action start', { message });
+    await this.voiceController.announceEvent(event);
+  }/**
+   * Voice announcement for action completion
+   * NASA Rule: Single responsibility - focused voice announcements
+   */  /**
+   * Voice announcement for action completion
+   * NASA Rule: Single responsibility - focused voice announcements
+   */
+  private async announceActionComplete(actionType: string, actionResult: any): Promise<void> {
+    this.log.debug('announceActionComplete called', { 
+      actionType, 
+      voiceEnabled: this.voiceController.isEnabled() 
+    });
+    
+    if (!this.voiceController.isEnabled()) {
+      this.log.debug('Voice controller disabled, skipping completion announcement');
+      return;
+    }
+
+    // Simple, direct voice messages - easier to debug and modify
+    const actionDescription = this.getActionDescription(actionType, actionResult.originalAction || actionResult);
+    const message = actionResult.success 
+      ? `Successfully completed ${actionDescription}`
+      : `Failed to ${actionDescription}`;
+
+    const event: VoiceEvent = {
+      type: 'action_complete',
+      message,
+      data: actionResult
+    };
+
+    this.log.debug('Announcing action complete', { message });
+    await this.voiceController.announceEvent(event);
+  }
+  /**
+   * Format action for voice announcement with AI reasoning
+   * NASA Rule: Keep functions focused and simple
+   */  private formatActionForVoiceWithReasoning(actionType: string, action: any, phase: 'start' | 'complete'): string {
+    // Generate reasoning and descriptive message for each action type
+    const reasoning = this.generateActionReasoning(actionType, action);
+    const actionDescription = this.getActionDescription(actionType, action);
+    
+    let message: string;
+    if (phase === 'start') {
+      message = `${reasoning}. I will ${actionDescription}`;
+    } else {
+      message = `Successfully ${actionDescription}`;
+    }
+    
+    this.log.debug('Formatted voice message', {
+      actionType,
+      phase,
+      reasoning: reasoning.substring(0, 50) + '...',
+      actionDescription,
+      fullMessage: message,
+      messageLength: message.length
+    });
+    
+    return message;
+  }
+
+  /**
+   * Generate AI reasoning for why an action is being taken
+   * NASA Rule: Provide clear explanations for system actions
+   */
+  private generateActionReasoning(actionType: string, action: any): string {
+    switch (actionType) {
+      case 'typeText':
+      case 'type':
+        const text = action.args?.[0] || action.text || '';
+        const shortText = text.length > 30 ? text.substring(0, 30) + '...' : text;
+        return `To input the required text "${shortText}"`;
+        case 'pressKey':
+      case 'key':
+        // Handle different action structure formats
+        const key = action.args?.[0] || action.key || action.data?.key || '';
+        const modifiers = action.args?.[1] || action.modifiers || action.data?.modifiers || [];
+        
+        if (modifiers.length > 0) {
+          return `To execute the keyboard shortcut ${modifiers.join('+')}+${key}`;
+        }
+        switch (key.toLowerCase()) {
+          case 'enter':
+          case 'return':
+            return 'To confirm the input or proceed to the next step';
+          case 'tab':
+            return 'To navigate to the next element';
+          case 'escape':
+            return 'To cancel the current operation';
+          case 'backspace':
+            return 'To delete the previous character';
+          case 'delete':
+            return 'To delete the selected content';
+          case 'space':
+            return 'To insert a space character';
+          case 'win':
+          case 'windows':
+          case 'meta':
+            return 'To open the Start menu or system launcher';
+          case 'printscreen':
+            return 'To capture a screenshot of the desktop';
+          default:
+            return `To perform the ${key} key operation`;
+        }
+      
+      case 'click':
+        const x = action.args?.[0] || action.x || 0;
+        const y = action.args?.[1] || action.y || 0;
+        // Try to get element description if available
+        const element = action.element || action.target;
+        if (element && element.description) {
+          return `To interact with ${element.description}`;
+        }
+        return `To select or activate the element at coordinates ${x}, ${y}`;
+      
+      case 'doubleClick':
+        return 'To open or activate the selected item';
+      
+      case 'scroll':
+        const direction = action.direction || 'down';
+        const amount = action.amount || action.args?.[0] || 'some';
+        return `To scroll ${direction} by ${amount} units to view more content`;
+      
+      case 'takeScreenshot':
+        return 'To capture the current screen state for analysis';
+      
+      case 'wait':
+        const duration = action.args?.[0] || action.duration || 1000;
+        const seconds = Math.round(duration / 1000 * 10) / 10;
+        return `To wait ${seconds} seconds for the interface to respond`;
+      
+      case 'task_complete':
+        return 'The goal has been achieved successfully';
+      
+      default:
+        return `To perform the ${actionType.replace(/([A-Z])/g, ' $1').toLowerCase().trim()} operation`;
+    }
+  }
+  /**
+   * Get descriptive action text for voice announcement  
+   * NASA Rule: Provide clear action descriptions
+   */
+  private getActionDescription(actionType: string, action: any): string {
+    switch (actionType) {
+      case 'typeText':
+      case 'type':
+        const text = action.args?.[0] || action.text || '';
+        const shortText = text.length > 20 ? text.substring(0, 20) + '...' : text;
+        return `typing "${shortText}"`;
+        
+      case 'pressKey':
+      case 'key':
+        // Handle different action structure formats
+        let key = action.args?.[0] || action.key || action.data?.key || '';
+        const modifiers = action.args?.[1] || action.modifiers || action.data?.modifiers || [];
+        
+        this.log.debug('Processing pressKey action for voice', {
+          actionType,
+          key,
+          modifiers,
+          actionStructure: Object.keys(action || {})
+        });
+        
+        if (modifiers.length > 0) {
+          return `pressing keyboard shortcut ${modifiers.join('+')}+${key}`;
+        }
+        
+        return `pressing key ${key}`;
+      
+      case 'click':
+        const x = action.args?.[0] || action.x || 0;
+        const y = action.args?.[1] || action.y || 0;
+        const element = action.element || action.target;
+        if (element && element.description) {
+          return `clicking on ${element.description}`;
+        }
+        return `clicking at position ${x}, ${y}`;
+      
+      case 'doubleClick':
+        return 'double-clicking the target';
+      
+      case 'scroll':
+        const direction = action.direction || 'down';
+        return `scrolling ${direction}`;
+      
+      case 'takeScreenshot':
+        return 'taking a screenshot';
+      
+      case 'wait':
+        const duration = action.args?.[0] || action.duration || 1000;
+        const seconds = Math.round(duration / 1000 * 10) / 10;
+        return `waiting for ${seconds} seconds`;
+      
+      case 'task_complete':
+        return 'marking the task as complete';
+      
+      default:
+        return actionType.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+    }
+  }
+  /**
+   * Voice announcement for goal setting
+   * NASA Rule: Provide clear status updates
+   */
+  private async announceGoal(goal: string): Promise<void> {
+    if (!this.voiceController.isEnabled()) {
+      return;
+    }
+
+    const message = `Starting autonomous task execution. My goal is to ${goal}. I will analyze the screen, plan actions, and execute them step by step until the goal is achieved.`;
+
+    const event: VoiceEvent = {
+      type: 'goal_set',
+      message,
+      data: { goal }
+    };
+
+    await this.voiceController.announceEvent(event);
+  }
+
+  /**
+   * Voice announcement for thinking/analysis phase
+   * NASA Rule: Keep user informed of system state
+   */
+  private async announceThinking(phase: string): Promise<void> {
+    if (!this.voiceController.isEnabled()) {
+      return;
+    }
+
+    const event: VoiceEvent = {
+      type: 'thinking',
+      message: phase,
+      data: { phase }
+    };
+
+    await this.voiceController.announceEvent(event);
+  }
+
+  /**
+   * Voice announcement for errors
+   * NASA Rule: Provide clear error reporting
+   */
+  private async announceError(error: string): Promise<void> {
+    if (!this.voiceController.isEnabled()) {
+      return;
+    }
+
+    const event: VoiceEvent = {
+      type: 'error',
+      message: error,
+      data: { error }
+    };
+
+    await this.voiceController.announceEvent(event);
+  }
+
+  /**
+   * Test method to validate voice announcements and logging
+   * NASA Rule: Include comprehensive testing capabilities
+   */
+  async testVoiceAndLogging(): Promise<void> {
+    this.log.info('🧪 Starting voice and logging test...');
+    
+    // Test environment variable loading
+
+    this.log.info('📋 Environment variables:', {
+      voiceEnabled: process.env.RUNIX_VOICE_ENABLED,
+      voiceRate: process.env.RUNIX_VOICE_RATE,
+      voicePitch: process.env.RUNIX_VOICE_PITCH,
+      voiceVolume: process.env.RUNIX_VOICE_VOLUME,
+      voiceLanguage: process.env.RUNIX_VOICE_LANGUAGE
+    });
+    
+    // Test voice controller configuration
+    this.log.info('🔊 Voice controller status:', {
+      enabled: this.voiceController.isEnabled(),
+      platform: process.platform
+    });
+    
+    // Test goal announcement
+    await this.announceGoal('Testing voice announcements and logging functionality');
+    
+    // Test thinking announcement
+    await this.announceThinking('analyzing');
+    
+    // Test sample AI reasoning
+    const sampleReasoning = "I can see a webpage is loaded. I need to take a screenshot first to analyze the current state, then determine what actions are needed to complete the task.";
+    this.log.info('🧠 Testing AI reasoning announcement', {
+      reasoningLength: sampleReasoning.length
+    });
+    
+    try {
+      await this.voiceController.speak(sampleReasoning);
+      this.log.info('✅ AI reasoning voice test completed successfully');
+    } catch (voiceError) {
+      this.log.warn('⚠️ AI reasoning voice test failed', { error: voiceError });
+    }
+    
+    // Test action announcements
+    const testAction = {
+      type: 'click',
+      coordinates: { x: 100, y: 200 },
+      target: 'test button'
+    };
+    
+    await this.announceActionStart('click', testAction);
+    
+    // Simulate action completion
+    const testResult = {
+      success: true,
+      duration: 1500,
+      message: 'Click action completed successfully'
+    };
+    
+    await this.announceActionComplete('click', testResult);
+    
+    this.log.info('✅ Voice and logging test completed');
   }
 }
