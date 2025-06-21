@@ -87,6 +87,34 @@ const executableName = process.platform === 'win32' ? 'VisionDriver.exe' : 'Visi
 
 logger.log(`Building standalone executable: ${executableName}`);
 
+// Try to remove existing executable if it exists and is locked
+if (fs.existsSync(executableName)) {
+  logger.log(`Existing ${executableName} found, attempting to remove...`);
+  try {
+    fs.unlinkSync(executableName);
+    logger.log(`✅ Removed existing ${executableName}`);
+  } catch (error) {
+    logger.error(`⚠️ Could not remove existing ${executableName}: ${error.message}`);
+    logger.log('Attempting forceful cleanup...');
+    
+    // Try alternative removal methods
+    try {
+      if (process.platform === 'win32') {
+        // Windows-specific forceful removal
+        execSync(`taskkill /F /IM ${executableName} 2>nul || echo "No process found"`, { stdio: 'pipe' });
+        // Wait a moment using timeout command on Windows
+        execSync('timeout /t 1 /nobreak >nul 2>&1 || echo "timeout done"', { stdio: 'pipe' });
+        // Try removal again
+        execSync(`del /F /Q "${executableName}" 2>nul || echo "File not found"`, { stdio: 'pipe' });
+        logger.log(`✅ Forcefully removed ${executableName}`);
+      }
+    } catch (forceError) {
+      logger.error(`❌ Forceful removal also failed: ${forceError.message}`);
+      logger.log('Continuing with build anyway...');
+    }
+  }
+}
+
 try {
     // Build standalone executable with correct target format
     execSync('npm exec -- pkg driver.js --targets node18-win-x64 --output VisionDriver.exe', { stdio: 'inherit' });

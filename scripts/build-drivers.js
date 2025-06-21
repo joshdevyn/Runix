@@ -48,8 +48,31 @@ for (const driverDir of driverDirs) {
   try {
     // Change to driver directory and run build
     process.chdir(driverPath);
-    execSync('node build.js', { stdio: 'inherit' });
-    logger.log(`✅ Successfully built ${driverDir}`);
+    
+    // Try up to 3 times if build fails due to file locking
+    let attempts = 0;
+    let buildSuccess = false;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts && !buildSuccess) {
+      try {
+        attempts++;
+        if (attempts > 1) {
+          logger.log(`Build attempt ${attempts} for ${driverDir}...`);
+          // Wait between attempts
+          execSync('timeout /t 2 /nobreak >nul 2>&1 || sleep 2', { stdio: 'pipe' });
+        }
+        
+        execSync('node build.js', { stdio: 'inherit' });
+        buildSuccess = true;
+        logger.log(`✅ Successfully built ${driverDir}`);
+      } catch (error) {
+        if (attempts >= maxAttempts) {
+          throw error; // Re-throw on final attempt
+        }
+        logger.log(`⚠️ Build attempt ${attempts} failed for ${driverDir}, retrying...`);
+      }
+    }
   } catch (error) {
     logger.error(`❌ Failed to build ${driverDir}:`, error.message);
     buildErrors.push({ driver: driverDir, error: error.message });
